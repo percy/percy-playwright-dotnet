@@ -61,7 +61,7 @@ namespace PercyIO.Playwright
             return _http;
         }
 
-        internal static void setSessionType(string? type)
+        public static void setSessionType(string? type)
         {
             sessionType = type;
         }
@@ -197,7 +197,7 @@ namespace PercyIO.Playwright
             IPage page, string name,
             IEnumerable<KeyValuePair<string, object>>? options = null)
         {
-            if (!Enabled()) throw new Exception("A Playwright `page` object is required.");
+            if (!Enabled()) return null;
             if (sessionType != "automate")
                 throw new Exception("Invalid function call - Screenshot(). Please use Snapshot() function for taking screenshot. Screenshot() should be used only while using Percy with Automate. For more information on usage of PercySnapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing");
             try

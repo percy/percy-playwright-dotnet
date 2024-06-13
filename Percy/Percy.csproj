@@ -10,14 +10,14 @@
   <PropertyGroup>
     <PackageId>PercyIO.Playwright</PackageId>
     <Description>Percy for Playwright Driver API .NET Bindings</Description>
-    <PackageTags>selenium;percy;visual;testing</PackageTags>
+    <PackageTags>playwright;percy;visual;testing</PackageTags>
     <Version>1.0.0</Version>
     <Company>BrowserStack</Company>
     <Copyright>Copyright BrowserStack</Copyright>
     <Authors>BrowserStack</Authors>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl></RepositoryUrl>
+    <RepositoryUrl>https://github.com/percy/percy-playwright-dotnet</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
