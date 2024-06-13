@@ -41,6 +41,8 @@ jobs:
         run: dotnet restore && npm install
         env:
           PERCY_POSTINSTALL_BROWSER: true
+      - name: Install Playwright Dependencies
+        run: pwsh bin/Debug/netX/playwright.ps1 install
       - name: Set up @percy/cli from git
         if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
