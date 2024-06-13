@@ -41,7 +41,7 @@ jobs:
         run: dotnet restore && npm install
         env:
           PERCY_POSTINSTALL_BROWSER: true
-      -name: Debug
+      - name: Debug
         run: |
           ls
           ls Percy.Test
