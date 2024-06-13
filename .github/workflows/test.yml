@@ -62,8 +62,8 @@ jobs:
           ls
           ls Percy.Test
           ls Percy.Test/bin
-          ls Percy.Test/bin/Debug
+          ls Percy.Test/bin/Release
       - name: Install Playwright Dependencies
-        run: pwsh Percy.Test/bin/Debug/net7.0/playwright.ps1 install
+        run: pwsh Percy.Test/bin/Release/net7.0/playwright.ps1 install
       - name: Run Tests
         run: npm test -- --no-restore
