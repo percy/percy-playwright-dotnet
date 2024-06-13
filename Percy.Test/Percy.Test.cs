@@ -27,7 +27,7 @@ namespace PercyIO.Playwright.Tests
         public async Task InitializeAsync()
         {
             playwright = await Microsoft.Playwright.Playwright.CreateAsync();
-            browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
+            browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
             Page = await browser.NewPageAsync();
         }
 

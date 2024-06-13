@@ -57,12 +57,6 @@ jobs:
           npx percy --version 
       - name: Build Package
         run: dotnet build --configuration Release --no-restore
-      - name: Debug
-        run: |
-          ls
-          ls Percy.Test
-          ls Percy.Test/bin
-          ls Percy.Test/bin/Release
       - name: Install Playwright Dependencies
         run: pwsh Percy.Test/bin/Release/net7.0/playwright.ps1 install
       - name: Run Tests
