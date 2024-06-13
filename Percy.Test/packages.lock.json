@@ -29,9 +29,9 @@
       },
       "Microsoft.Playwright": {
         "type": "Direct",
-        "requested": "[1.44.0, )",
-        "resolved": "1.44.0",
-        "contentHash": "stag3Jv/FtjqR5/8UcVfyYyktPt9AHxBnNazyytu4cq5W8/J5DQDQEednk/cK2iGy2Y/dC0hUcCdxp9cFDckmA==",
+        "requested": "[1.43.0, )",
+        "resolved": "1.43.0",
+        "contentHash": "FvY6w9duxWBXe3gV6MSqvUcdF9daSBfDVUrYKcr4Fyro0nbiCf4hQUsPxx+CJ3P8PtSrzC675oU14qGzcrGNJw==",
         "dependencies": {
           "Microsoft.Bcl.AsyncInterfaces": "6.0.0",
           "System.ComponentModel.Annotations": "5.0.0",
@@ -220,7 +220,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.CSharp": "[4.7.0, )",
-          "Microsoft.Playwright": "[1.42.1, )",
+          "Microsoft.Playwright": "[1.43.0, )",
           "Newtonsoft.Json": "[13.0.3, )",
           "System.Text.Json": "[7.0.0, )"
         }

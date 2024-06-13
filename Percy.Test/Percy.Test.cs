@@ -21,7 +21,7 @@ namespace PercyIO.Playwright.Tests
 
         public TestsFixture ()
         {
-            // The actual initialization will be done in InitializeAsync
+            Percy.setHttpClient(new HttpClient());
         }
 
         public async Task InitializeAsync()

@@ -45,7 +45,7 @@ namespace PercyIO.Playwright
             return JsonSerializer.Serialize(payload).ToString();
         }
 
-        internal static void setHttpClient(HttpClient client)
+        public static void setHttpClient(HttpClient client)
         {
             _http = client;
         }
@@ -156,11 +156,11 @@ namespace PercyIO.Playwright
 
             try
             {
-                if (Utils.EvaluateSync<bool>(page, "!!window.PercyDOM") == false)
-                    Utils.EvaluateSync<string>(page, GetPercyDOM());
+                if (PercyPlaywrightDriver.EvaluateSync<bool>(page, "!!window.PercyDOM") == false)
+                    PercyPlaywrightDriver.EvaluateSync<string>(page, GetPercyDOM());
 
                 string opts = JsonSerializer.Serialize(options);
-                var domSnapshot = Utils.EvaluateSync<object>(page, $"PercyDOM.serialize({opts})");
+                var domSnapshot = PercyPlaywrightDriver.EvaluateSync<object>(page, $"PercyDOM.serialize({opts})");
 
                 Options snapshotOptions = new Options {
                     { "clientInfo", CLIENT_INFO },
@@ -193,8 +193,14 @@ namespace PercyIO.Playwright
             }
         }
 
+        public static JObject? Screenshot(IPage page, string name, IEnumerable<KeyValuePair<string, object>>? options = null)
+        {
+            PercyPlaywrightDriver percyPage = new PercyPlaywrightDriver(page);
+            return Screenshot(percyPage, name, options);
+        }
+
         public static JObject? Screenshot(
-            IPage page, string name,
+            IPercyPlaywrightDriver percyPage, string name,
             IEnumerable<KeyValuePair<string, object>>? options = null)
         {
             if (!Enabled()) return null;
@@ -202,15 +208,14 @@ namespace PercyIO.Playwright
                 throw new Exception("Invalid function call - Screenshot(). Please use Snapshot() function for taking screenshot. Screenshot() should be used only while using Percy with Automate. For more information on usage of PercySnapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing");
             try
             {
-                SessionDetails sessionDetails = Utils.GetSessionDetails(page);
                 Options screenshotOptions = new Options {
-                    { "sessionId", sessionDetails.hashed_id},
-                    { "frameGuid", sessionDetails.frameGuid},
-                    { "pageGuid", sessionDetails.pageGuid},
+                    { "sessionId", percyPage.GetSessionId()},
+                    { "frameGuid", percyPage.GetFrameGUID()},
+                    { "pageGuid", percyPage.GetPageGUID()},
                     { "framework", "playwright"},
                     { "clientInfo", CLIENT_INFO },
                     { "environmentInfo", ENVIRONMENT_INFO },
-                    { "url", page.Url },
+                    { "url", percyPage.GetUrl() },
                     { "snapshotName", name }
                 };
 

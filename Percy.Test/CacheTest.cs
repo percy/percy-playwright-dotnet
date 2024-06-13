@@ -3,7 +3,6 @@ namespace PercyIO.Playwright.Tests
 {
   public class CacheTest
   {
-    private readonly CacheItem<object> cacheItem;
     Cache<string, object> _cache;
 
     public CacheTest()
@@ -16,7 +15,7 @@ namespace PercyIO.Playwright.Tests
     {
       // Arrange
       _cache.Clear();
-      string expected = null;
+      string? expected = null;
       // Act
       string actual = (string)_cache.Get("abc");
       // Assert
@@ -28,7 +27,7 @@ namespace PercyIO.Playwright.Tests
     {
       // Arrange
       _cache.Clear();
-      string expected = null;
+      string? expected = null;
       _cache.Store("A", "abc");
       // Act
       _cache.Remove("A");
