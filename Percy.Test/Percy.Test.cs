@@ -22,6 +22,9 @@ namespace PercyIO.Playwright.Tests
         public TestsFixture ()
         {
             Percy.setHttpClient(new HttpClient());
+            playwright = null!;
+            browser = null!;
+            Page = null!;
         }
 
         public async Task InitializeAsync()
