@@ -30,30 +30,30 @@ namespace PercyIO.Playwright
         public string GetFrameGUID() {
             Type frameImplType = this.page.MainFrame.GetType().BaseType;
             FieldInfo frameGuidField = frameImplType.GetField("<Guid>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
-            string frame_guid = (string)frameGuidField.GetValue(this.page.MainFrame);
-            return frame_guid;
+            string frameGuid = (string)frameGuidField.GetValue(this.page.MainFrame);
+            return frameGuid;
         }
         public string GetSessionId()
         {
             // It is browser's guid maintained by playwright, considering it is unique for one automate session
             // will use it to cache the session details
-            string browserId = GetBrowserGuid();
-            if (cache.Get(browserId) == null)
+            string browserGuid = GetBrowserGuid();
+            if (cache.Get(browserGuid) == null)
             {
                 string sessionDetailsJson = PercyPlaywrightDriver.EvaluateSync<string>(this.page, "_ => {}", "browserstack_executor: {\"action\":\"getSessionDetails\"}");
                 var sessionDetails = JsonSerializer.Deserialize<JsonElement>(sessionDetailsJson);
                 sessionDetails.TryGetProperty("hashed_id", out JsonElement hashedIdElement);
-                cache.Store(browserId, hashedIdElement.GetString());
+                cache.Store(browserGuid, hashedIdElement.GetString());
             }
-            return (string)cache.Get(browserId);
+            return (string)cache.Get(browserGuid);
         }
 
         private string GetBrowserGuid()
         {
             Type browserImplType = this.page.Context.Browser.GetType().BaseType;
             FieldInfo guidField = browserImplType.GetField("<Guid>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
-            string guid = (string)guidField.GetValue(this.page.Context.Browser);
-            return guid;
+            string browserGuid = (string)guidField.GetValue(this.page.Context.Browser);
+            return browserGuid;
         }
 
         public static T EvaluateSync<T>(IPage page, string script, string arguments = null) {

@@ -146,6 +146,7 @@ namespace PercyIO.Playwright
 
         public class Options : Dictionary<string, object> { }
 
+        // To take percy snapshot
         public static JObject? Snapshot(
             IPage page, string name,
             IEnumerable<KeyValuePair<string, object>>? options = null)
@@ -199,6 +200,7 @@ namespace PercyIO.Playwright
             return Screenshot(percyPage, name, options);
         }
 
+        // To take percy screenshot
         public static JObject? Screenshot(
             IPercyPlaywrightDriver percyPage, string name,
             IEnumerable<KeyValuePair<string, object>>? options = null)
