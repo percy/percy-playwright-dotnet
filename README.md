@@ -1,5 +1,5 @@
 # percy-playwright-dotnet
-![Test](https://github.com/percy/percy-selenium-dotnet/workflows/Test/badge.svg)
+![Test](https://github.com/percy/percy-playwright-dotnet/workflows/Test/badge.svg)
 
 [Percy](https://percy.io) visual testing for .NET Playwright.
 
@@ -99,7 +99,7 @@ $ percy exec -- [your test command]
 - `options` - An object containing various snapshot options ([see per-snapshot configuration options](https://docs.percy.io/docs/cli-configuration#per-snapshot-configuration))
 
 ## Running Percy on Automate
-`Percy.Screenshot(driver, name, options)` [ needs @percy/cli 1.27.0-beta.0+ ];
+`Percy.Screenshot(driver, name, options)` [ needs @percy/cli 1.28.8-beta.2+ ];
 
 This is an example test using the `Percy.Screenshot` method.
 
