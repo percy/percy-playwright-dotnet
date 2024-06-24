@@ -96,7 +96,7 @@ $ percy exec -- [your test command]
 
 - `page` (**required**) - A playwright page instance
 - `name` (**required**) - The snapshot name; must be unique to each snapshot
-- `options` - An object containing various snapshot options ([see per-snapshot configuration options](https://docs.percy.io/docs/cli-configuration#per-snapshot-configuration))
+- `options` - An object containing various snapshot options ([see per-snapshot configuration options](https://www.browserstack.com/docs/percy/take-percy-snapshots/overview#per-snapshot-configuration))
 
 ## Running Percy on Automate
 `Percy.Screenshot(driver, name, options)` [ needs @percy/cli 1.28.8-beta.2+ ];
@@ -185,4 +185,4 @@ $ percy exec -- [dotnet test command]
 [percy] Done!
 ```
 
-Refer to docs here: [Percy on Automate](https://docs.percy.io/docs/integrate-functional-testing-with-visual-testing)
+Refer to docs here: [Percy on Automate](https://www.browserstack.com/docs/percy/integrate/functional-and-visual)
