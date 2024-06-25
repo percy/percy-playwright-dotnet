@@ -99,7 +99,7 @@ $ percy exec -- [your test command]
 - `options` - An object containing various snapshot options ([see per-snapshot configuration options](https://www.browserstack.com/docs/percy/take-percy-snapshots/overview#per-snapshot-configuration))
 
 ## Running Percy on Automate
-`Percy.Screenshot(driver, name, options)` [ needs @percy/cli 1.28.8-beta.2+ ];
+`Percy.Screenshot(driver, name, options)` [ needs @percy/cli 1.28.8+ ];
 
 This is an example test using the `Percy.Screenshot` method.
 
