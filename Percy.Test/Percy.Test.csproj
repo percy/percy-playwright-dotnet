@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.TestPlatform.ObjectModel" Version="17.4.1" Condition="$(TargetFramework.StartsWith('net4')) AND '$(OS)' == 'Unix'" />
+    <PackageReference Include="Microsoft.TestPlatform.ObjectModel" Version="17.10.0" Condition="$(TargetFramework.StartsWith('net4')) AND '$(OS)' == 'Unix'" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.4.1" />
     <PackageReference Include="Microsoft.Playwright" Version="1.43.0" />
     <PackageReference Include="Moq" Version="4.18.4" />
