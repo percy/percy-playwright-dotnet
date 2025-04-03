@@ -209,29 +209,29 @@ class Program
 ```
 var obj1 = new Region
 {
-    ElementSelector = new RegionElementSelector
+    elementSelector = new RegionElementSelector
     {
-        ElementCSS = ".ad-banner"
+        elementCSS = ".ad-banner"
     },
-    Padding = new RegionPadding
+    padding = new RegionPadding
     {
-        Top = 10,
-        Left = 20,
-        Right = 15,
-        Bottom = 10
+        top = 10,
+        left = 20,
+        right = 15,
+        bottom = 10
     },
-    Algorithm = "intelliignore",
-    Configuration = new RegionConfiguration
+    algorithm = "intelliignore",
+    configuration = new RegionConfiguration
     {
-        DiffSensitivity = 2,
-        ImageIgnoreThreshold = 0.2,
-        CarouselsEnabled = true,
-        BannersEnabled = true,
-        AdsEnabled = true
+        diffSensitivity = 2,
+        imageIgnoreThreshold = 0.2,
+        carouselsEnabled = true,
+        bannersEnabled = true,
+        adsEnabled = true
     },
-    Assertion = new RegionAssertion
+    assertion = new RegionAssertion
     {
-        DiffIgnoreThreshold = 0.4
+        diffIgnoreThreshold = 0.4
     }
 };
 
