@@ -192,10 +192,10 @@ namespace PercyIO.Playwright
 
 
         public static Region CreateRegion(
-            Region.RegionBoundingBox boundingBox = null,
-            string elementXpath = null,
-            string elementCSS = null,
-            Region.RegionPadding padding = null,
+            Region.RegionBoundingBox? boundingBox = null,
+            string? elementXpath = null,
+            string? elementCSS = null,
+            Region.RegionPadding? padding = null,
             string algorithm = "ignore",
             int? diffSensitivity = null,
             double? imageIgnoreThreshold = null,
