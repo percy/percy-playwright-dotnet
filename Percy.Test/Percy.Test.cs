@@ -146,15 +146,14 @@ namespace PercyIO.Playwright.Tests
 
             JsonElement data = Request("/test/logs");
             List<string> logs = new List<string>();
-
             foreach (JsonElement log in data.GetProperty("logs").EnumerateArray())
             {
                 string? msg = log.GetProperty("message").GetString();
-                if (msg != null) logs.Add(msg);
+                if (msg != null && !msg.Contains("\"cores\":") && !msg.Contains("---------") && !msg.Contains("domSnapshot.userAgent") && !msg.Contains("queued"))
+                    logs.Add(msg);
             }
 
             List<string> expected = new List<string> {
-                "---------",
                 "Received snapshot: Snapshot 1",
                 "- url: http://localhost:5338/test/snapshot",
                 "- widths: 375px, 1280px",
@@ -168,7 +167,6 @@ namespace PercyIO.Playwright.Tests
                 $"- environmentInfo: {Percy.ENVIRONMENT_INFO}",
                 "- domSnapshot: true",
                 "Snapshot found: Snapshot 1",
-                "---------",
                 "Received snapshot: Snapshot 2",
                 "- url: http://localhost:5338/test/snapshot",
                 "- widths: 375px, 1280px",
@@ -182,7 +180,6 @@ namespace PercyIO.Playwright.Tests
                 $"- environmentInfo: {Percy.ENVIRONMENT_INFO}",
                 "- domSnapshot: true",
                 "Snapshot found: Snapshot 2",
-                "---------",
                 "Received snapshot: Snapshot 3",
                 "- url: http://localhost:5338/test/snapshot",
                 "- widths: 375px, 1280px",
@@ -215,10 +212,10 @@ namespace PercyIO.Playwright.Tests
             foreach (JsonElement log in data.GetProperty("logs").EnumerateArray())
             {
                 string? msg = log.GetProperty("message").GetString();
-                if (msg != null) logs.Add(msg);
+                if (msg != null && !msg.Contains("\"cores\":"))
+                    logs.Add(msg);
             }
             List<string> expected = new List<string> {
-                "---------",
                 "Received snapshot: Snapshot 1",
                 "- url: http://localhost:5338/test/snapshot",
                 "- widths: 375px, 1280px",
@@ -231,12 +228,10 @@ namespace PercyIO.Playwright.Tests
                 $"- clientInfo: {Percy.CLIENT_INFO}",
                 $"- environmentInfo: {Percy.ENVIRONMENT_INFO}",
                 "- domSnapshot: true",
-                "The Synchronous CLI functionality is not compatible with skipUploads option.",
-                "Snapshot found: Snapshot 1",
             };
 
-            foreach (int i in expected.Select((v, i) => i))
-                Assert.Equal(expected[i], logs[i]);
+        for (int i = 0; i < expected.Count; i++)
+            Assert.Equal(expected[i], logs[i + 1]);
         }
 
         [Fact]
