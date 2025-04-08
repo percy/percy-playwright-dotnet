@@ -199,14 +199,14 @@ class Program
 ### Example Usage for regions
 
 ```
-var obj1 = new Region
+var region = new Percy.Region
 {
-    elementSelector = new RegionElementSelector
+    elementSelector = new Percy.Region.RegionElementSelector
     {
         elementCSS = ".ad-banner"
     },
     algorithm = "intelliignore",
-    configuration = new RegionConfiguration
+    configuration = new Percy.Region.RegionConfiguration
     {
         diffSensitivity = 2,
         imageIgnoreThreshold = 0.2,
@@ -214,13 +214,13 @@ var obj1 = new Region
         bannersEnabled = true,
         adsEnabled = true
     },
-    assertion = new RegionAssertion
+    assertion = new Percy.Region.RegionAssertion
     {
         diffIgnoreThreshold = 0.4
     }
 };
 
-Percy.Snapshot(page,  "Homepage", regions: new List<Region> { obj1 });
+Percy.Snapshot(page,  "Homepage", regions: new List<Region> { region });
 
 ```
 
