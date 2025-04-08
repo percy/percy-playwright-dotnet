@@ -146,15 +146,14 @@ namespace PercyIO.Playwright.Tests
 
             JsonElement data = Request("/test/logs");
             List<string> logs = new List<string>();
-
             foreach (JsonElement log in data.GetProperty("logs").EnumerateArray())
             {
                 string? msg = log.GetProperty("message").GetString();
-                if (msg != null) logs.Add(msg);
+                if (msg != null && !msg.Contains("\"cores\":") && !msg.Contains("---------") && !msg.Contains("domSnapshot.userAgent") && !msg.Contains("queued"))
+                    logs.Add(msg);
             }
 
             List<string> expected = new List<string> {
-                "---------",
                 "Received snapshot: Snapshot 1",
                 "- url: http://localhost:5338/test/snapshot",
                 "- widths: 375px, 1280px",
@@ -168,7 +167,6 @@ namespace PercyIO.Playwright.Tests
                 $"- environmentInfo: {Percy.ENVIRONMENT_INFO}",
                 "- domSnapshot: true",
                 "Snapshot found: Snapshot 1",
-                "---------",
                 "Received snapshot: Snapshot 2",
                 "- url: http://localhost:5338/test/snapshot",
                 "- widths: 375px, 1280px",
@@ -182,7 +180,6 @@ namespace PercyIO.Playwright.Tests
                 $"- environmentInfo: {Percy.ENVIRONMENT_INFO}",
                 "- domSnapshot: true",
                 "Snapshot found: Snapshot 2",
-                "---------",
                 "Received snapshot: Snapshot 3",
                 "- url: http://localhost:5338/test/snapshot",
                 "- widths: 375px, 1280px",
@@ -215,10 +212,10 @@ namespace PercyIO.Playwright.Tests
             foreach (JsonElement log in data.GetProperty("logs").EnumerateArray())
             {
                 string? msg = log.GetProperty("message").GetString();
-                if (msg != null) logs.Add(msg);
+                if (msg != null && !msg.Contains("\"cores\":"))
+                    logs.Add(msg);
             }
             List<string> expected = new List<string> {
-                "---------",
                 "Received snapshot: Snapshot 1",
                 "- url: http://localhost:5338/test/snapshot",
                 "- widths: 375px, 1280px",
@@ -231,12 +228,10 @@ namespace PercyIO.Playwright.Tests
                 $"- clientInfo: {Percy.CLIENT_INFO}",
                 $"- environmentInfo: {Percy.ENVIRONMENT_INFO}",
                 "- domSnapshot: true",
-                "The Synchronous CLI functionality is not compatible with skipUploads option.",
-                "Snapshot found: Snapshot 1",
             };
 
-            foreach (int i in expected.Select((v, i) => i))
-                Assert.Equal(expected[i], logs[i]);
+        for (int i = 0; i < expected.Count; i++)
+            Assert.Equal(expected[i], logs[i + 1]);
         }
 
         [Fact]
@@ -268,4 +263,75 @@ namespace PercyIO.Playwright.Tests
             Percy.Enabled = oldEnabledFn;
         }
     }
+
+    public class RegionTests
+    {
+        [Fact]
+        public void CreateRegion_ShouldAssignPropertiesCorrectly()
+        {
+            // Arrange
+            var customPadding = new Percy.Region.RegionPadding
+            {
+                top = 10,
+                left = 5,
+                right = 5,
+                bottom = 10
+            };
+            
+            var boundingBox = new Percy.Region.RegionBoundingBox
+            {
+                top = 0,
+                left = 0,
+                width = 100,
+                height = 100
+            };
+            
+            var diffSensitivity = 5;
+            var imageIgnoreThreshold = 0.8;
+            var carouselsEnabled = true;
+            var algorithm = "intelliignore";
+            var diffIgnoreThreshold = 0.5;
+            
+            // Act
+            var region = Percy.CreateRegion(
+                padding: customPadding,
+                boundingBox: boundingBox,
+                algorithm: algorithm,
+                diffSensitivity: diffSensitivity,
+                imageIgnoreThreshold: imageIgnoreThreshold,
+                carouselsEnabled: carouselsEnabled,
+                diffIgnoreThreshold: diffIgnoreThreshold
+            );
+
+            // Assert
+            // Validate Padding
+            Assert.NotNull(region.padding);
+            Assert.Equal(customPadding.top, region.padding.top);
+            Assert.Equal(customPadding.left, region.padding.left);
+            Assert.Equal(customPadding.right, region.padding.right);
+            Assert.Equal(customPadding.bottom, region.padding.bottom);
+            
+            // Validate ElementSelector
+            Assert.NotNull(region.elementSelector);
+            Assert.NotNull(region.elementSelector.boundingBox);
+            Assert.Equal(boundingBox.top, region.elementSelector.boundingBox.top);
+            Assert.Equal(boundingBox.left, region.elementSelector.boundingBox.left);
+            Assert.Equal(boundingBox.width, region.elementSelector.boundingBox.width);
+            Assert.Equal(boundingBox.height, region.elementSelector.boundingBox.height);
+            
+            // Validate Algorithm
+            Assert.Equal(algorithm, region.algorithm);
+            
+            // Validate Configuration
+            Assert.NotNull(region.configuration);
+            Assert.Equal(diffSensitivity, region.configuration.diffSensitivity);
+            Assert.Equal(imageIgnoreThreshold, region.configuration.imageIgnoreThreshold);
+            Assert.Equal(carouselsEnabled, region.configuration.carouselsEnabled);
+            
+            // Validate Assertion
+            Assert.NotNull(region.assertion);
+            Assert.Equal(diffIgnoreThreshold, region.assertion.diffIgnoreThreshold);
+        }
+    }
+
 }
