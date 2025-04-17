@@ -172,7 +172,7 @@ class Program
           - `right` (int): Right coordinate of the consider region.
     - `regions` parameter that allows users to apply snapshot options to specific areas of the page. This parameter is an array where each object defines a custom region with configurations.
       - Parameters:
-        - `elementSelector` (optional)
+        - `elementSelector` (optional, only one of the following must be provided, if this is not provided then full page will be considered as region)
             - `boundingBox` (object): Defines the coordinates and size of the region.
               - `x` (number): X-coordinate of the region.
               - `y` (number): Y-coordinate of the region.
@@ -220,7 +220,26 @@ var region = new Percy.Region
     }
 };
 
-Percy.Snapshot(page,  "Homepage", regions: new List<Region> { region });
+ // or we can use CreateRegion function
+
+  var diffSensitivity = 3;
+  var carouselsEnabled = true;
+  var algorithm = "intelliignore";
+  var diffIgnoreThreshold = 0.5;
+
+  var region = Percy.CreateRegion(
+      algorithm: algorithm,
+      diffSensitivity: diffSensitivity,
+      carouselsEnabled: carouselsEnabled,
+      diffIgnoreThreshold: diffIgnoreThreshold
+  );
+
+  var options = new Dictionary<string, object>
+  {
+    {"regions", new List<Percy.Region> { region }},
+  };
+
+  Percy.Snapshot(page, "snapshot_2", options);
 
 ```
 
