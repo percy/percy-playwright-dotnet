@@ -216,6 +216,7 @@ namespace PercyIO.Playwright.Tests
                     logs.Add(msg);
             }
             List<string> expected = new List<string> {
+                "---------",
                 "Received snapshot: Snapshot 1",
                 "- url: http://localhost:5338/test/snapshot",
                 "- widths: 375px, 1280px",
@@ -231,7 +232,7 @@ namespace PercyIO.Playwright.Tests
             };
 
         for (int i = 0; i < expected.Count; i++)
-            Assert.Equal(expected[i], logs[i + 1]);
+            Assert.Equal(expected[i], logs[i]);
         }
 
         [Fact]
