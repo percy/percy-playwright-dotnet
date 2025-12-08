@@ -268,7 +268,9 @@ namespace PercyIO.Playwright
                 if (PercyPlaywrightDriver.EvaluateSync<bool>(page, "!!window.PercyDOM") == false)
                     PercyPlaywrightDriver.EvaluateSync<string>(page, GetPercyDOM());
 
-                string opts = JsonSerializer.Serialize(options);
+                // Convert IEnumerable to Dictionary for proper JSON serialization
+                var optionsDict = options?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                string opts = JsonSerializer.Serialize(optionsDict);
                 var domSnapshot = PercyPlaywrightDriver.EvaluateSync<object>(page, $"PercyDOM.serialize({opts})");
 
                 Options snapshotOptions = new Options {
@@ -330,7 +332,11 @@ namespace PercyIO.Playwright
                 };
 
                 if (options != null)
-                    screenshotOptions.Add("options", options);
+                {
+                    // Convert IEnumerable to Dictionary for proper JSON serialization
+                    var optionsDict = options.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                    screenshotOptions.Add("options", optionsDict);
+                }
 
                 dynamic res = Request("/percy/automateScreenshot", JObject.FromObject(screenshotOptions), true);
                 dynamic data = JsonSerializer.Deserialize<object>(res.content);
