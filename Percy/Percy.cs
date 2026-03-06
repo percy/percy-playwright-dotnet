@@ -702,9 +702,8 @@ namespace PercyIO.Playwright
 
                 // Convert IEnumerable to Dictionary for proper JSON serialization
                 var optionsDict = options?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-                var cookiesTask = page.Context.CookiesAsync();
-                cookiesTask.Wait();
-                string cookiesJson = JsonSerializer.Serialize(cookiesTask.Result);
+                var cookies = page.Context.CookiesAsync().GetAwaiter().GetResult();
+                string cookiesJson = JsonSerializer.Serialize(cookies);
                 object domSnapshot = IsResponsiveSnapshotCapture(optionsDict)
                     ? CaptureResponsiveDom(page, optionsDict, cookiesJson)
                     : GetSerializedDom(page, optionsDict, cookiesJson);
