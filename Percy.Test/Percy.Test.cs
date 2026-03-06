@@ -52,12 +52,12 @@ namespace PercyIO.Playwright.Tests
     public class UnitTests : IAsyncLifetime
     {
         private readonly TestsFixture _fixture;
-        private readonly StringWriter _stdout;
+        private readonly StringWriter _stderr;
 
         public UnitTests()
         {
-            _stdout = new StringWriter();
-            Console.SetOut(_stdout);
+            _stderr = new StringWriter();
+            Console.SetError(_stderr);
 
             _fixture = new TestsFixture();
 
@@ -79,7 +79,7 @@ namespace PercyIO.Playwright.Tests
 
         public string Stdout()
         {
-            return Regex.Replace(_stdout.ToString(), @"\e\[(\d+;)*(\d+)?[ABCDHJKfmsu]", "");
+            return Regex.Replace(_stderr.ToString(), @"\e\[(\d+;)*(\d+)?[ABCDHJKfmsu]", "");
         }
 
         private static HttpClient _http = new HttpClient();

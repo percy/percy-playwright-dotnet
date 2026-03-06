@@ -30,13 +30,14 @@ namespace PercyIO.Playwright
         private static void Log<T>(T message, string lvl = "info")
         {
             string label = DEBUG ? "percy:dotnet" : "percy";
-            string labeledMessage = $"[\u001b[35m{label}\u001b[39m] {message}";
+            string plainMessage = $"[{label}] {message}";
+            string ansiMessage = $"[\u001b[35m{label}\u001b[39m] {message}";
             // Send log message to Percy CLI
             try
             {
                 Dictionary<string, object> logPayload = new Dictionary<string, object>
                 {
-                    { "message", labeledMessage },
+                    { "message", ansiMessage },
                     { "level", lvl }
                 };
                 Request("/percy/log", logPayload);
@@ -44,14 +45,17 @@ namespace PercyIO.Playwright
             catch (Exception e)
             {
                 if (DEBUG)
-                    Console.WriteLine($"Sending log to CLI failed: {e.Message}");
+                    Console.Error.WriteLine($"[{label}] Sending log to CLI failed: {e.Message}");
             }
             finally
             {
-                // Only log to console if lvl is not 'debug' or DEBUG is true
+                // Write to stderr (Console.Error) rather than stdout for two reasons:
+                // 1. stderr is unbuffered by default, so output appears immediately even inside catch/finally blocks.
+                // 2. Tools like `npx percy exec` forward stderr directly to the terminal, whereas stdout can be
+                //    swallowed or delayed when the process exits before the buffer is flushed.
                 if (lvl != "debug" || DEBUG)
                 {
-                    Console.WriteLine(labeledMessage);
+                    Console.Error.WriteLine(plainMessage);
                 }
             }
         }
@@ -464,6 +468,7 @@ namespace PercyIO.Playwright
             }
             catch (Exception error)
             {
+                Log("Update Percy CLI to the latest version to use responsiveSnapshotCapture", "error");
                 Log($"Failed to get responsive widths: {error}", "debug");
                 throw new Exception("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
             }
