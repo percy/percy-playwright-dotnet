@@ -631,9 +631,13 @@ namespace PercyIO.Playwright
 
             try
             {
+                bool resetChangesWidth = lastWindowWidth != currentWidth;
                 var resetTask = page.SetViewportSizeAsync(currentWidth, currentHeight);
                 resetTask.Wait();
-                WaitForResizeCount(page, resizeCount + 1, currentWidth);
+                if (resetChangesWidth)
+                {
+                    WaitForResizeCount(page, resizeCount + 1, currentWidth);
+                }
             }
             catch (Exception error)
             {
