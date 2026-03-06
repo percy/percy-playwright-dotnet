@@ -77,7 +77,7 @@ namespace PercyIO.Playwright.Tests
         }
 
 
-        public string Stdout()
+        public string Stderr()
         {
             return Regex.Replace(_stderr.ToString(), @"\e\[(\d+;)*(\d+)?[ABCDHJKfmsu]", "");
         }
@@ -109,7 +109,7 @@ namespace PercyIO.Playwright.Tests
             Percy.Snapshot(_fixture.Page, "Snapshot 1");
             Percy.Snapshot(_fixture.Page, "Snapshot 2");
 
-            Assert.Equal("[percy] Percy is not running, disabling snapshots\n", Stdout());
+            Assert.Equal("[percy] Percy is not running, disabling snapshots\n", Stderr());
         }
 
         [Fact]
@@ -125,7 +125,7 @@ namespace PercyIO.Playwright.Tests
                 "which is no longer supported by this SDK. " +
                 "Please uninstall @percy/agent and install @percy/cli instead. " +
                 "https://www.browserstack.com/docs/percy/migration/migrate-to-cli\n",
-                Stdout()
+                Stderr()
             );
         }
 
@@ -137,7 +137,7 @@ namespace PercyIO.Playwright.Tests
             Percy.Snapshot(_fixture.Page, "Snapshot 1");
             Percy.Snapshot(_fixture.Page, "Snapshot 2");
 
-            Assert.Equal("[percy] Unsupported Percy CLI version, 0.0.1\n", Stdout());
+            Assert.Equal("[percy] Unsupported Percy CLI version, 0.0.1\n", Stderr());
         }
 
         [Fact]
@@ -211,7 +211,7 @@ namespace PercyIO.Playwright.Tests
             Assert.Contains(
                 "[percy] Could not take DOM snapshot \"Snapshot 1\"\n" +
                 "[percy] System.Net.Http.HttpRequestException:",
-                Stdout()
+                Stderr()
             );
         }
 
