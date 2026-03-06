@@ -584,7 +584,7 @@ namespace PercyIO.Playwright
                     try
                     {
                         var resizeTask = page.SetViewportSizeAsync(width, height);
-                        resizeTask.Wait();
+                        resizeTask.GetAwaiter().GetResult();
                     }
                     catch (Exception error)
                     {
@@ -601,7 +601,7 @@ namespace PercyIO.Playwright
                     try
                     {
                         var reloadTask = page.ReloadAsync();
-                        reloadTask.Wait();
+                        reloadTask.GetAwaiter().GetResult();
 
                         if (!PercyPlaywrightDriver.EvaluateSync<bool>(page, "!!window.PercyDOM"))
                         {
@@ -630,7 +630,7 @@ namespace PercyIO.Playwright
             {
                 bool resetChangesViewport = lastWindowWidth != currentWidth || lastWindowHeight != currentHeight;
                 var resetTask = page.SetViewportSizeAsync(currentWidth, currentHeight);
-                resetTask.Wait();
+                resetTask.GetAwaiter().GetResult();
                 if (resetChangesViewport)
                 {
                     WaitForResizeCount(page, resizeCount + 1, currentWidth);
