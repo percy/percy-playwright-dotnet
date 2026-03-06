@@ -647,20 +647,42 @@ namespace PercyIO.Playwright
         {
             if (cliConfig is JsonElement configElement)
             {
-                if (configElement.GetProperty("percy").TryGetProperty("deferUploads", out JsonElement deferUploadsProperty))
+                if (configElement.ValueKind == JsonValueKind.Object &&
+                    configElement.TryGetProperty("percy", out JsonElement percyElement) &&
+                    percyElement.ValueKind == JsonValueKind.Object &&
+                    percyElement.TryGetProperty("deferUploads", out JsonElement deferUploadsProperty) &&
+                    (deferUploadsProperty.ValueKind == JsonValueKind.True || deferUploadsProperty.ValueKind == JsonValueKind.False))
                 {
-                    if (deferUploadsProperty.GetBoolean()) { return false; }
+                    if (deferUploadsProperty.GetBoolean())
+                    {
+                        return false;
+                    }
                 }
 
-                if (options != null && options.ContainsKey("responsiveSnapshotCapture") && (bool)options["responsiveSnapshotCapture"])
+                if (options != null &&
+                    options.TryGetValue("responsiveSnapshotCapture", out var responsiveOption) &&
+                    responsiveOption is bool responsiveFromOptions &&
+                    responsiveFromOptions)
                 {
                     return true;
                 }
 
-                return configElement.GetProperty("snapshot").GetProperty("responsiveSnapshotCapture").GetBoolean();
+                if (configElement.ValueKind == JsonValueKind.Object &&
+                    configElement.TryGetProperty("snapshot", out JsonElement snapshotElement) &&
+                    snapshotElement.ValueKind == JsonValueKind.Object &&
+                    snapshotElement.TryGetProperty("responsiveSnapshotCapture", out JsonElement responsiveProperty) &&
+                    (responsiveProperty.ValueKind == JsonValueKind.True || responsiveProperty.ValueKind == JsonValueKind.False))
+                {
+                    return responsiveProperty.GetBoolean();
+                }
+
+                return false;
             }
 
-            return options != null && options.ContainsKey("responsiveSnapshotCapture") && (bool)options["responsiveSnapshotCapture"];
+            return options != null &&
+                   options.TryGetValue("responsiveSnapshotCapture", out var responsiveOptionNoConfig) &&
+                   responsiveOptionNoConfig is bool responsiveFromOptionsNoConfig &&
+                   responsiveFromOptionsNoConfig;
         }
 
         // To take percy snapshot
