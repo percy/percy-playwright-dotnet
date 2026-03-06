@@ -572,6 +572,47 @@ namespace PercyIO.Playwright.Tests
         }
 
         [Fact]
+        public void ResponsiveCaptureResetsViewportWhenLastWidthMatchesOriginalButHeightDiffers()
+        {
+            // Regression test: when the last captured entry has the same width as the
+            // original viewport but a different explicit height, the viewport reset must
+            // still wait for the resize event and restore both dimensions correctly.
+            try
+            {
+                // Start from a known viewport so height difference is deterministic.
+                var setViewport = _fixture.Page.SetViewportSizeAsync(1280, 720);
+                setViewport.Wait();
+
+                // Use deviceDetails to supply explicit heights (500) for both widths.
+                // config=[] prevents config widths from overriding the deviceDetails heights.
+                // After the loop the page is at (1280, 500); the reset to (1280, 720) changes
+                // only height, so resetChangesViewport must be true to wait for the resize.
+                UnitTests.Request("/test/api/config", new
+                {
+                    responsive = true,
+                    config = Array.Empty<int>(),
+                    deviceDetails = new[]
+                    {
+                        new { width = 375, height = 500 },
+                        new { width = 1280, height = 500 }
+                    }
+                });
+
+                Percy.Snapshot(_fixture.Page, "Height-Only Reset Snapshot");
+
+                // Both width and height must be fully restored.
+                var finalViewport = _fixture.Page.ViewportSize;
+                Assert.NotNull(finalViewport);
+                Assert.Equal(1280, finalViewport!.Width);
+                Assert.Equal(720, finalViewport.Height);
+            }
+            finally
+            {
+                UnitTests.Request("/test/api/config", new { responsive = false, config = new[] { 375, 1280 } });
+            }
+        }
+
+        [Fact]
         public void SleepTimeFlagIsNotSetByDefaultSoNoPauseBetweenWidths()
         {
             // RESPONSIVE_CAPTURE_SLEEP_TIME is read from the environment; when not set

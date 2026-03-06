@@ -566,6 +566,7 @@ namespace PercyIO.Playwright
             }
 
             int lastWindowWidth = currentWidth;
+            int lastWindowHeight = currentHeight;
             int resizeCount = 0;
             int sleepTime = 0;
             int defaultHeight = CalculateDefaultHeight(page, currentHeight, options);
@@ -592,6 +593,7 @@ namespace PercyIO.Playwright
 
                     WaitForResizeCount(page, resizeCount, width);
                     lastWindowWidth = width;
+                    lastWindowHeight = height;
                 }
 
                 if (PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)
@@ -626,10 +628,10 @@ namespace PercyIO.Playwright
 
             try
             {
-                bool resetChangesWidth = lastWindowWidth != currentWidth;
+                bool resetChangesViewport = lastWindowWidth != currentWidth || lastWindowHeight != currentHeight;
                 var resetTask = page.SetViewportSizeAsync(currentWidth, currentHeight);
                 resetTask.Wait();
-                if (resetChangesWidth)
+                if (resetChangesViewport)
                 {
                     WaitForResizeCount(page, resizeCount + 1, currentWidth);
                 }
