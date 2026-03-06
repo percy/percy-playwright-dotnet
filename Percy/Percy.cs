@@ -174,10 +174,15 @@ namespace PercyIO.Playwright
                 }
                 else
                 {
-                    data.TryGetProperty("type", out JsonElement type);
-                    data.TryGetProperty("config", out JsonElement config);
-                    setSessionType(type.ToString());
-                    setCliConfig(config);
+                    if (data.TryGetProperty("type", out JsonElement type))
+                    {
+                        setSessionType(type.ToString());
+                    }
+
+                    if (data.TryGetProperty("config", out JsonElement config))
+                    {
+                        setCliConfig(config);
+                    }
                     return (bool)(_enabled = true);
                 }
             }
