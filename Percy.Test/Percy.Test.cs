@@ -212,7 +212,7 @@ namespace PercyIO.Playwright.Tests
             foreach (JsonElement log in data.GetProperty("logs").EnumerateArray())
             {
                 string? msg = log.GetProperty("message").GetString();
-                if (msg != null && !msg.Contains("\"cores\":"))
+                if (msg != null && !msg.Contains("\"cores\":") && !msg.Contains("memoryInfo") && !msg.Contains("queued"))
                     logs.Add(msg);
             }
             List<string> expected = new List<string> {
