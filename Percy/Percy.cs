@@ -647,7 +647,7 @@ namespace PercyIO.Playwright
             return domSnapshots;
         }
 
-        private static bool isResponsiveSnapshotCapture(Dictionary<string, object>? options)
+        private static bool IsResponsiveSnapshotCapture(Dictionary<string, object>? options)
         {
             if (cliConfig is JsonElement configElement)
             {
@@ -708,7 +708,7 @@ namespace PercyIO.Playwright
                 var cookiesTask = page.Context.CookiesAsync();
                 cookiesTask.Wait();
                 string cookiesJson = JsonSerializer.Serialize(cookiesTask.Result);
-                object domSnapshot = isResponsiveSnapshotCapture(optionsDict)
+                object domSnapshot = IsResponsiveSnapshotCapture(optionsDict)
                     ? CaptureResponsiveDom(page, optionsDict, cookiesJson)
                     : GetSerializedDom(page, optionsDict, cookiesJson);
 
