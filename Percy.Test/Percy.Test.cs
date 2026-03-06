@@ -53,9 +53,11 @@ namespace PercyIO.Playwright.Tests
     {
         private readonly TestsFixture _fixture;
         private readonly StringWriter _stderr;
+        private readonly TextWriter _originalStderr;
 
         public UnitTests()
         {
+            _originalStderr = Console.Error;
             _stderr = new StringWriter();
             Console.SetError(_stderr);
 
@@ -71,9 +73,17 @@ namespace PercyIO.Playwright.Tests
             await _fixture.Page.GotoAsync($"{Percy.CLI_API}/test/snapshot");
         }
 
-        public Task DisposeAsync()
+        public async Task DisposeAsync()
         {
-            return _fixture.DisposeAsync().AsTask();
+            try
+            {
+                await _fixture.DisposeAsync();
+            }
+            finally
+            {
+                Console.SetError(_originalStderr);
+                _stderr.Dispose();
+            }
         }
 
 
