@@ -65,7 +65,7 @@ namespace PercyIO.Playwright
         private static string? sessionType = null;
         private static object? cliConfig;
 
-        public static readonly string RESPONSIVE_CAPTURE_SLEEP_TIME =
+        public static readonly string? RESPONSIVE_CAPTURE_SLEEP_TIME =
             Environment.GetEnvironmentVariable("RESPONSIVE_CAPTURE_SLEEP_TIME");
         public static readonly bool PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT =
             (Environment.GetEnvironmentVariable("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT") ?? "")
