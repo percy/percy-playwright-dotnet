@@ -328,8 +328,7 @@ namespace PercyIO.Playwright
             try
             {
                 // Inject Percy DOM into the cross-origin frame
-                var injectTask = frame.EvaluateAsync(percyDomScript);
-                injectTask.Wait();
+                frame.EvaluateAsync(percyDomScript).GetAwaiter().GetResult();
 
                 // enableJavaScript=True prevents the standard iframe serialization logic from running.
                 // This is necessary because we're manually handling cross-origin iframe serialization here.
@@ -340,9 +339,7 @@ namespace PercyIO.Playwright
 
                 // Serialize the frame
                 string serializeScript = $"PercyDOM.serialize({JsonSerializer.Serialize(optionsForFrame)})";
-                var serializeTask = frame.EvaluateAsync(serializeScript);
-                serializeTask.Wait();
-                var iframeSnapshot = serializeTask.Result;
+                var iframeSnapshot = frame.EvaluateAsync(serializeScript).GetAwaiter().GetResult();
 
                 // Get the iframe's element data from the main page context
                 string getDataScript = "(fUrl) => {\n" +
@@ -355,9 +352,7 @@ namespace PercyIO.Playwright
                     "}\n" +
                     "}";
 
-                var getDataTask = page.EvaluateAsync(getDataScript, frameUrl);
-                getDataTask.Wait();
-                var iframeData = getDataTask.Result;
+                var iframeData = page.EvaluateAsync(getDataScript, frameUrl).GetAwaiter().GetResult();
 
                 if (iframeData == null)
                 {
