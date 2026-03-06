@@ -813,6 +813,48 @@ namespace PercyIO.Playwright.Tests
                 "corsIframes should NOT be present when there are no cross-origin iframes"
             );
         }
+
+        [Fact]
+        public async Task ResponsiveSnapshotIncludesCorsIframesInEachDomSnapshot()
+        {
+            // When responsive capture is enabled AND the page has cross-origin iframes,
+            // every per-width DOM snapshot in the array should contain a corsIframes key.
+            try
+            {
+                const string html = "<p>Responsive CORS Test</p>\n" +
+                                    "<iframe src=\"http://127.0.0.1:5338/test/snapshot\"></iframe>\n";
+
+                await _fixture.Page.RouteAsync("http://localhost:5338/responsive-cors-page", route =>
+                    route.FulfillAsync(new RouteFulfillOptions { ContentType = "text/html", Body = html }));
+                await _fixture.Page.GotoAsync("http://localhost:5338/responsive-cors-page");
+
+                UnitTests.Request("/test/api/config", new { responsive = true, config = new[] { 375, 1280 } });
+
+                Percy.Snapshot(_fixture.Page, "Responsive CORS Snapshot");
+
+                JsonElement requests = UnitTests.Request("/test/requests");
+                var snapshotRequests = GetSnapshotRequests(requests);
+
+                Assert.NotEmpty(snapshotRequests);
+                var domSnapshots = snapshotRequests.Last().GetProperty("body").GetProperty("domSnapshot");
+                Assert.Equal(JsonValueKind.Array, domSnapshots.ValueKind);
+
+                // Every per-width DOM snapshot must contain the corsIframes property
+                foreach (var snapshot in domSnapshots.EnumerateArray())
+                {
+                    Assert.True(
+                        snapshot.TryGetProperty("corsIframes", out JsonElement corsIframes),
+                        "corsIframes should be present in each responsive DOM snapshot when cross-origin iframes exist"
+                    );
+                    Assert.Equal(JsonValueKind.Array, corsIframes.ValueKind);
+                    Assert.True(corsIframes.GetArrayLength() > 0, "corsIframes array must not be empty");
+                }
+            }
+            finally
+            {
+                UnitTests.Request("/test/api/config", new { responsive = false, config = new[] { 375, 1280 } });
+            }
+        }
     }
 
     // ─── CORS IFrame Unit Tests ────────────────────────────────────────────────
@@ -974,6 +1016,63 @@ namespace PercyIO.Playwright.Tests
             // Validate Assertion
             Assert.NotNull(region.assertion);
             Assert.Equal(diffIgnoreThreshold, region.assertion.diffIgnoreThreshold);
+        }
+
+        [Fact]
+        public void CreateRegion_IgnoreAlgorithmDoesNotSetConfiguration()
+        {
+            // algorithm="ignore" (the default) must never populate the configuration
+            // property, even when config-level parameters are supplied.
+            var region = Percy.CreateRegion(
+                algorithm: "ignore",
+                diffSensitivity: 3,
+                imageIgnoreThreshold: 0.5
+            );
+
+            Assert.Equal("ignore", region.algorithm);
+            Assert.Null(region.configuration);
+        }
+
+        [Fact]
+        public void CreateRegion_NoDiffIgnoreThreshold_AssertionIsNull()
+        {
+            // When diffIgnoreThreshold is not supplied the assertion property must remain null.
+            var region = Percy.CreateRegion(algorithm: "standard", diffSensitivity: 2);
+
+            Assert.Null(region.assertion);
+        }
+
+        [Fact]
+        public void CreateRegion_StandardAlgorithmSetsConfiguration()
+        {
+            var region = Percy.CreateRegion(
+                algorithm: "standard",
+                diffSensitivity: 7,
+                bannersEnabled: false,
+                adsEnabled: true
+            );
+
+            Assert.Equal("standard", region.algorithm);
+            Assert.NotNull(region.configuration);
+            Assert.Equal(7, region.configuration.diffSensitivity);
+            Assert.Equal(false, region.configuration.bannersEnabled);
+            Assert.Equal(true, region.configuration.adsEnabled);
+            Assert.Null(region.configuration.imageIgnoreThreshold);
+            Assert.Null(region.configuration.carouselsEnabled);
+        }
+
+        [Fact]
+        public void CreateRegion_WithElementXpathAndCSSSelectors()
+        {
+            var region = Percy.CreateRegion(
+                elementXpath: "//div[@id='header']",
+                elementCSS: "#header"
+            );
+
+            Assert.NotNull(region.elementSelector);
+            Assert.Equal("//div[@id='header']", region.elementSelector.elementXpath);
+            Assert.Equal("#header", region.elementSelector.elementCSS);
+            Assert.Null(region.elementSelector.boundingBox);
         }
     }
 
