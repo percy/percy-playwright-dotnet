@@ -61,8 +61,8 @@ namespace PercyIO.Playwright
         private static string? sessionType = null;
         private static object? cliConfig;
 
-        public static readonly string RESONSIVE_CAPTURE_SLEEP_TIME =
-            Environment.GetEnvironmentVariable("RESONSIVE_CAPTURE_SLEEP_TIME");
+        public static readonly string RESPONSIVE_CAPTURE_SLEEP_TIME =
+            Environment.GetEnvironmentVariable("RESPONSIVE_CAPTURE_SLEEP_TIME");
         public static readonly bool PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT =
             (Environment.GetEnvironmentVariable("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT") ?? "")
                 .Equals("true", StringComparison.OrdinalIgnoreCase);
@@ -610,7 +610,7 @@ namespace PercyIO.Playwright
                     }
                 }
 
-                if (Int32.TryParse(RESONSIVE_CAPTURE_SLEEP_TIME, out sleepTime))
+                if (Int32.TryParse(RESPONSIVE_CAPTURE_SLEEP_TIME, out sleepTime))
                 {
                     Thread.Sleep(sleepTime * 1000);
                 }

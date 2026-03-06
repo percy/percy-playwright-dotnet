@@ -564,10 +564,10 @@ namespace PercyIO.Playwright.Tests
         [Fact]
         public void SleepTimeFlagIsNotSetByDefaultSoNoPauseBetweenWidths()
         {
-            // RESONSIVE_CAPTURE_SLEEP_TIME is read from the environment; when not set
+            // RESPONSIVE_CAPTURE_SLEEP_TIME is read from the environment; when not set
             // it is null, so Int32.TryParse returns false and no Thread.Sleep fires.
             Assert.False(
-                Int32.TryParse(Percy.RESONSIVE_CAPTURE_SLEEP_TIME, out _),
+                Int32.TryParse(Percy.RESPONSIVE_CAPTURE_SLEEP_TIME, out _),
                 "Sleep time env var should not be set in the test environment"
             );
 
@@ -593,7 +593,7 @@ namespace PercyIO.Playwright.Tests
         [Fact]
         public void SleepTimeCausesDelayBetweenWidthCaptures()
         {
-            // RESONSIVE_CAPTURE_SLEEP_TIME is a static readonly string field populated
+            // RESPONSIVE_CAPTURE_SLEEP_TIME is a static readonly string field populated
             // once from the environment at type-initialization time by Percy.cs.
             // Mutating initonly statics via reflection is blocked in the .NET 7 runtime
             // ("Cannot set initonly static field after type is initialized"), so we
@@ -603,15 +603,15 @@ namespace PercyIO.Playwright.Tests
             //  2. The capture must finish well inside a generous bound — ruling out an
             //     accidental sleep on the hot path.
             //  3. The field value satisfies the exact predicate Percy.cs uses to decide
-            //     whether to sleep: Int32.TryParse(RESONSIVE_CAPTURE_SLEEP_TIME, out _).
+            //     whether to sleep: Int32.TryParse(RESPONSIVE_CAPTURE_SLEEP_TIME, out _).
             //     When the env var is absent this must return false.
             //  4. A synthetic non-null parseable value DOES satisfy that predicate,
             //     confirming that if the env var were set the sleep branch would fire.
 
             // 1+3: field is null → TryParse returns false → no sleep
-            Assert.Null(Percy.RESONSIVE_CAPTURE_SLEEP_TIME);
+            Assert.Null(Percy.RESPONSIVE_CAPTURE_SLEEP_TIME);
             Assert.False(
-                Int32.TryParse(Percy.RESONSIVE_CAPTURE_SLEEP_TIME, out _),
+                Int32.TryParse(Percy.RESPONSIVE_CAPTURE_SLEEP_TIME, out _),
                 "Sleep branch must not trigger when env var is absent"
             );
 
