@@ -619,7 +619,10 @@ namespace PercyIO.Playwright
 
                 if (Int32.TryParse(RESPONSIVE_CAPTURE_SLEEP_TIME, out sleepTime))
                 {
-                    Thread.Sleep(sleepTime * 1000);
+                    if (sleepTime > 0)
+                    {
+                        Thread.Sleep(TimeSpan.FromSeconds(sleepTime));
+                    }
                 }
 
                 var domSnapshot = GetSerializedDom(page, options, cookiesJson, width);
