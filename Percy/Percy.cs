@@ -578,7 +578,7 @@ namespace PercyIO.Playwright
                 int width = widthHeight.width;
                 int height = widthHeight.height ?? defaultHeight;
 
-                if (lastWindowWidth != width)
+                if (lastWindowWidth != width || lastWindowHeight != height)
                 {
                     resizeCount++;
                     try
