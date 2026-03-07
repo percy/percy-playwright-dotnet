@@ -545,7 +545,7 @@ namespace PercyIO.Playwright
             Log($"Timed out waiting for window resize event for width {width}", "debug");
         }
 
-        public static List<object> CaptureResponsiveDom(IPage page, Dictionary<string, object>? options, string cookiesJson)
+        internal static List<object> CaptureResponsiveDom(IPage page, Dictionary<string, object>? options, string cookiesJson)
         {
             List<int> userWidths = ParseWidthsFromOptions(options);
             List<ResponsiveWidth> widthHeights = GetResponsiveWidths(userWidths);
