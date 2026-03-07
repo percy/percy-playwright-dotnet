@@ -472,7 +472,7 @@ namespace PercyIO.Playwright
             {
                 Log("Update Percy CLI to the latest version to use responsiveSnapshotCapture", "error");
                 Log($"Failed to get responsive widths: {error}", "debug");
-                throw new Exception("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+                throw new Exception("Update Percy CLI to the latest version to use responsiveSnapshotCapture", error);
             }
         }
 
