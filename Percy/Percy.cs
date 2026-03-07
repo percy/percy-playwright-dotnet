@@ -333,10 +333,8 @@ namespace PercyIO.Playwright
 
                 // enableJavaScript=True prevents the standard iframe serialization logic from running.
                 // This is necessary because we're manually handling cross-origin iframe serialization here.
-                var optionsForFrame = new Dictionary<string, object>(options ?? new Dictionary<string, object>())
-                {
-                    { "enableJavaScript", true }
-                };
+                var optionsForFrame = new Dictionary<string, object>(options ?? new Dictionary<string, object>());
+                optionsForFrame["enableJavaScript"] = true;
 
                 // Serialize the frame
                 string serializeScript = $"PercyDOM.serialize({JsonSerializer.Serialize(optionsForFrame)})";
