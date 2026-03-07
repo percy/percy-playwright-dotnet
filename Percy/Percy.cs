@@ -328,6 +328,7 @@ namespace PercyIO.Playwright
             try
             {
                 // Inject Percy DOM into the cross-origin frame
+                // .GetAwaiter().GetResult() is used to block synchronously; EvaluateSync is not available for IFrame, only IPage
                 frame.EvaluateAsync(percyDomScript).GetAwaiter().GetResult();
 
                 // enableJavaScript=True prevents the standard iframe serialization logic from running.
@@ -339,6 +340,7 @@ namespace PercyIO.Playwright
 
                 // Serialize the frame
                 string serializeScript = $"PercyDOM.serialize({JsonSerializer.Serialize(optionsForFrame)})";
+                // .GetAwaiter().GetResult() is used to block synchronously; EvaluateSync is not available for IFrame, only IPage
                 var iframeSnapshot = frame.EvaluateAsync(serializeScript).GetAwaiter().GetResult();
 
                 // Get the iframe's element data from the main page context
@@ -352,7 +354,7 @@ namespace PercyIO.Playwright
                     "}\n" +
                     "}";
 
-                var iframeData = page.EvaluateAsync(getDataScript, frameUrl).GetAwaiter().GetResult();
+                var iframeData = PercyPlaywrightDriver.EvaluateSync<object>(page, getDataScript, frameUrl);
 
                 if (iframeData == null)
                 {
@@ -583,8 +585,7 @@ namespace PercyIO.Playwright
                     resizeCount++;
                     try
                     {
-                        var resizeTask = page.SetViewportSizeAsync(width, height);
-                        resizeTask.GetAwaiter().GetResult();
+                        PercyPlaywrightDriver.SetViewportSizeSync(page, width, height);
                     }
                     catch (Exception error)
                     {
@@ -600,6 +601,7 @@ namespace PercyIO.Playwright
                 {
                     try
                     {
+                        // ReloadAsync has no sync equivalent; block with .GetAwaiter().GetResult() to ensure page is fully loaded before capturing DOM
                         var reloadTask = page.ReloadAsync();
                         reloadTask.GetAwaiter().GetResult();
 
@@ -629,8 +631,7 @@ namespace PercyIO.Playwright
             try
             {
                 bool resetChangesViewport = lastWindowWidth != currentWidth || lastWindowHeight != currentHeight;
-                var resetTask = page.SetViewportSizeAsync(currentWidth, currentHeight);
-                resetTask.GetAwaiter().GetResult();
+                PercyPlaywrightDriver.SetViewportSizeSync(page, currentWidth, currentHeight);
                 if (resetChangesViewport)
                 {
                     WaitForResizeCount(page, resizeCount + 1, currentWidth);
@@ -702,6 +703,7 @@ namespace PercyIO.Playwright
 
                 // Convert IEnumerable to Dictionary for proper JSON serialization
                 var optionsDict = options?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                // CookiesAsync has no sync equivalent; block with .GetAwaiter().GetResult() to fetch cookies before serializing the DOM
                 var cookies = page.Context.CookiesAsync().GetAwaiter().GetResult();
                 string cookiesJson = JsonSerializer.Serialize(cookies);
                 object domSnapshot = IsResponsiveSnapshotCapture(optionsDict)

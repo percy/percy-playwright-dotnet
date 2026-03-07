@@ -61,5 +61,11 @@ namespace PercyIO.Playwright
             scriptTask.Wait();
             return scriptTask.Result;
         }
+
+        // SetViewportSizeAsync has no sync equivalent in Playwright; this helper blocks synchronously
+        // to ensure the viewport resize is complete before proceeding
+        public static void SetViewportSizeSync(IPage page, int width, int height) {
+            page.SetViewportSizeAsync(width, height).GetAwaiter().GetResult();
+        }
     }
 }
