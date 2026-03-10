@@ -505,29 +505,48 @@ namespace PercyIO.Playwright
             {
                 int minHeight = currentHeight;
 
-                if (options != null && options.TryGetValue("minHeight", out object? minHeightValue))
+                // Fallback order: options.minHeight -> config.snapshot.minHeight -> currentHeight.
+                if (options != null &&
+                    options.TryGetValue("minHeight", out object? minHeightFromOptions) &&
+                    TryGetIntFromValue(minHeightFromOptions, out int parsedOptionsMinHeight))
                 {
-                    if (minHeightValue is int intValue)
-                    {
-                        minHeight = intValue;
-                    }
-                    else if (minHeightValue is JsonElement element &&
-                             element.ValueKind == JsonValueKind.Number &&
-                             element.TryGetInt32(out int jsonInt))
-                    {
-                        minHeight = jsonInt;
-                    }
+                    minHeight = parsedOptionsMinHeight;
                 }
-
-                return PercyPlaywrightDriver.EvaluateSync<int>(
-                    page,
-                    $"(() => window.outerHeight - window.innerHeight + {minHeight})()"
-                );
+                else if (cliConfig is JsonElement configElement &&
+                         configElement.ValueKind == JsonValueKind.Object &&
+                         configElement.TryGetProperty("snapshot", out JsonElement snapshotElement) &&
+                         snapshotElement.ValueKind == JsonValueKind.Object &&
+                         snapshotElement.TryGetProperty("minHeight", out JsonElement minHeightElement) &&
+                         TryGetIntFromValue(minHeightElement, out int parsedConfigMinHeight))
+                {
+                    minHeight = parsedConfigMinHeight;
+                }
+                return minHeight;
             }
             catch
             {
                 return currentHeight;
             }
+        }
+
+        private static bool TryGetIntFromValue(object? value, out int result)
+        {
+            if (value is int intValue)
+            {
+                result = intValue;
+                return true;
+            }
+
+            if (value is JsonElement element &&
+                element.ValueKind == JsonValueKind.Number &&
+                element.TryGetInt32(out int jsonInt))
+            {
+                result = jsonInt;
+                return true;
+            }
+
+            result = default;
+            return false;
         }
 
         private static void WaitForResizeCount(IPage page, int expectedCount, int width)
