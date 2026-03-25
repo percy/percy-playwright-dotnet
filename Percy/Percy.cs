@@ -9,6 +9,7 @@ using System.ComponentModel;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Microsoft.Playwright;
 using Newtonsoft.Json.Linq;
 
@@ -26,15 +27,52 @@ namespace PercyIO.Playwright
             Regex.Replace(RuntimeInformation.FrameworkDescription, @"\s+", "-"),
             @"-([\d\.]+).*$", "/$1").Trim().ToLower();
 
-        private static void Log<T>(T message)
+        private static void Log<T>(T message, string lvl = "info")
         {
             string label = DEBUG ? "percy:dotnet" : "percy";
-            Console.WriteLine($"[\u001b[35m{label}\u001b[39m] {message}");
+            string plainMessage = $"[{label}] {message}";
+            string ansiMessage = $"[\u001b[35m{label}\u001b[39m] {message}";
+            // Send log message to Percy CLI
+            try
+            {
+                Dictionary<string, object> logPayload = new Dictionary<string, object>
+                {
+                    { "message", ansiMessage },
+                    { "level", lvl }
+                };
+                Request("/percy/log", logPayload);
+            }
+            catch (Exception e)
+            {
+                if (DEBUG)
+                    Console.Error.WriteLine($"[{label}] Sending log to CLI failed: {e.Message}");
+            }
+            finally
+            {
+                // Write to stderr (Console.Error) rather than stdout for two reasons:
+                // 1. stderr is unbuffered by default, so output appears immediately even inside catch/finally blocks.
+                // 2. Tools like `npx percy exec` forward stderr directly to the terminal, whereas stdout can be
+                //    swallowed or delayed when the process exits before the buffer is flushed.
+                if (lvl != "debug" || DEBUG)
+                {
+                    Console.Error.WriteLine(plainMessage);
+                }
+            }
         }
 
         private static HttpClient? _http;
 
         private static string? sessionType = null;
+        private static object? cliConfig;
+
+        public static readonly string? RESPONSIVE_CAPTURE_SLEEP_TIME =
+            Environment.GetEnvironmentVariable("RESPONSIVE_CAPTURE_SLEEP_TIME");
+        public static readonly bool PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT =
+            (Environment.GetEnvironmentVariable("PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT") ?? "")
+                .Equals("true", StringComparison.OrdinalIgnoreCase);
+        public static readonly bool PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE =
+            (Environment.GetEnvironmentVariable("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE") ?? "")
+                .Equals("true", StringComparison.OrdinalIgnoreCase);
 
         private static string PayloadParser(object? payload = null, bool alreadyJson = false)
         {
@@ -64,6 +102,11 @@ namespace PercyIO.Playwright
         public static void setSessionType(string? type)
         {
             sessionType = type;
+        }
+
+        internal static void setCliConfig(object config)
+        {
+            cliConfig = config;
         }
 
         // Added isJson since current JSON parsing doesn’t support nested objects and thats why we using different lib
@@ -131,8 +174,15 @@ namespace PercyIO.Playwright
                 }
                 else
                 {
-                    data.TryGetProperty("type", out JsonElement type);
-                    setSessionType(type.ToString());
+                    if (data.TryGetProperty("type", out JsonElement type))
+                    {
+                        setSessionType(type.ToString());
+                    }
+
+                    if (data.TryGetProperty("config", out JsonElement config))
+                    {
+                        setCliConfig(config);
+                    }
                     return (bool)(_enabled = true);
                 }
             }
@@ -254,6 +304,409 @@ namespace PercyIO.Playwright
 
         public class Options : Dictionary<string, object> { }
 
+        private static bool IsCrossOriginFrame(string frameUrl, string pageUrl)
+        {
+            if (frameUrl == "about:blank")
+                return false;
+
+            try
+            {
+                var pageUri = new Uri(pageUrl);
+                var frameUri = new Uri(frameUrl);
+                return pageUri.Host != frameUri.Host;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static object? ProcessFrame(IPage page, IFrame frame, Dictionary<string, object>? options, string percyDomScript)
+        {
+            string frameUrl = frame.Url;
+
+            try
+            {
+                // Inject Percy DOM into the cross-origin frame
+                // .GetAwaiter().GetResult() is used to block synchronously; EvaluateSync is not available for IFrame, only IPage
+                frame.EvaluateAsync(percyDomScript).GetAwaiter().GetResult();
+
+                // enableJavaScript=True prevents the standard iframe serialization logic from running.
+                // This is necessary because we're manually handling cross-origin iframe serialization here.
+                var optionsForFrame = new Dictionary<string, object>(options ?? new Dictionary<string, object>());
+                optionsForFrame["enableJavaScript"] = true;
+
+                // Serialize the frame
+                string serializeScript = $"PercyDOM.serialize({JsonSerializer.Serialize(optionsForFrame)})";
+                // .GetAwaiter().GetResult() is used to block synchronously; EvaluateSync is not available for IFrame, only IPage
+                var iframeSnapshot = frame.EvaluateAsync(serializeScript).GetAwaiter().GetResult();
+
+                // Get the iframe's element data from the main page context
+                string getDataScript = "(fUrl) => {\n" +
+                    "const iframes = Array.from(document.querySelectorAll('iframe'));\n" +
+                    "const matchingIframe = iframes.find(iframe => iframe.src.startsWith(fUrl));\n" +
+                    "if (matchingIframe) {\n" +
+                    "return {\n" +
+                    "percyElementId: matchingIframe.getAttribute('data-percy-element-id')\n" +
+                    "};\n" +
+                    "}\n" +
+                    "}";
+
+                var iframeData = PercyPlaywrightDriver.EvaluateSync<object>(page, getDataScript, frameUrl);
+
+                if (iframeData == null)
+                {
+                    Log($"Skipping cross-origin frame {frameUrl}: no matching iframe element with percyElementId found on main page", "debug");
+                    return null;
+                }
+
+                return new
+                {
+                    iframeData = iframeData,
+                    iframeSnapshot = iframeSnapshot,
+                    frameUrl = frameUrl
+                };
+            }
+            catch (Exception e)
+            {
+                Log($"Failed to process cross-origin frame {frameUrl}: {e.Message}", "debug");
+                return null;
+            }
+        }
+
+        private static object GetSerializedDom(IPage page, Dictionary<string, object>? options, string cookiesJson, int? width = null)
+        {
+            string opts = JsonSerializer.Serialize(options);
+            string widthAssignment = width.HasValue ? $"dom.width = {width.Value};" : "";
+            string script = $"(() => {{ const dom = PercyDOM.serialize({opts}); dom.cookies = {cookiesJson}; {widthAssignment} return dom; }})()";
+            var domSnapshot = PercyPlaywrightDriver.EvaluateSync<object>(page, script);
+
+            // Process CORS IFrames
+            try
+            {
+                string percyDomScript = GetPercyDOM();
+                var frames = page.Frames;
+
+                // Filter for cross-origin frames (excluding about:blank)
+                var crossOriginFrames = frames
+                    .Where(f => IsCrossOriginFrame(f.Url, page.Url))
+                    .ToList();
+
+                if (crossOriginFrames.Count > 0 && !string.IsNullOrEmpty(percyDomScript))
+                {
+                    var processedFrames = new List<object>();
+                    foreach (var frame in crossOriginFrames)
+                    {
+                        var result = ProcessFrame(page, frame, options, percyDomScript);
+                        if (result != null)
+                        {
+                            processedFrames.Add(result);
+                        }
+                    }
+
+                    if (processedFrames.Count > 0)
+                    {   
+                        // Cast domSnapshot to IDictionary to add the corsIframes property
+                        // This preserves the ExpandoObject type and avoids serialization issues
+                        if (domSnapshot is IDictionary<string, object> domDict)
+                        {
+                            domDict["corsIframes"] = processedFrames;
+                        }
+                        else
+                        {
+                            Log("Unexpected domSnapshot type, unable to add corsIframes property", "debug");    
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Log($"Failed to process cross-origin iframes: {e.Message}", "debug");
+            }
+
+            return domSnapshot;
+        }
+
+        private class ResponsiveWidth
+        {
+            public int width { get; set; }
+            public int? height { get; set; }
+        }
+
+        private static List<ResponsiveWidth> GetResponsiveWidths(List<int>? widths = null)
+        {
+            widths ??= new List<int>();
+
+            try
+            {
+                string queryParam = widths.Count > 0 ? $"?widths={string.Join(",", widths)}" : "";
+                dynamic res = Request($"/percy/widths-config{queryParam}");
+                var data = JsonSerializer.Deserialize<JsonElement>(res.content);
+
+                if (!data.TryGetProperty("widths", out JsonElement widthsElement) || widthsElement.ValueKind != JsonValueKind.Array)
+                {
+                    Log("Update Percy CLI to the latest version to use responsiveSnapshotCapture", "error");
+                    throw new Exception("Update Percy CLI to the latest version to use responsiveSnapshotCapture");
+                }
+
+                return widthsElement.EnumerateArray().Select(widthItem =>
+                {
+                    if (widthItem.ValueKind == JsonValueKind.Number)
+                    {
+                        return new ResponsiveWidth { width = widthItem.GetInt32() };
+                    }
+
+                    int width = widthItem.GetProperty("width").GetInt32();
+                    int? height = null;
+                    if (widthItem.TryGetProperty("height", out JsonElement heightElement) && heightElement.ValueKind == JsonValueKind.Number)
+                    {
+                        height = heightElement.GetInt32();
+                    }
+
+                    return new ResponsiveWidth { width = width, height = height };
+                }).ToList();
+            }
+            catch (Exception error)
+            {
+                Log("Update Percy CLI to the latest version to use responsiveSnapshotCapture", "error");
+                Log($"Failed to get responsive widths: {error}", "debug");
+                throw new Exception("Update Percy CLI to the latest version to use responsiveSnapshotCapture", error);
+            }
+        }
+
+        private static List<int> ParseWidthsFromOptions(Dictionary<string, object>? options)
+        {
+            if (options == null || !options.TryGetValue("widths", out object widthsObj) || widthsObj == null)
+            {
+                return new List<int>();
+            }
+
+            if (widthsObj is IEnumerable<int> enumerableWidths)
+            {
+                return enumerableWidths.ToList();
+            }
+
+            if (widthsObj is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Array)
+            {
+                return jsonElement.EnumerateArray().Select(x => x.GetInt32()).ToList();
+            }
+
+            return new List<int>();
+        }
+
+        private static int CalculateDefaultHeight(IPage page, int currentHeight, Dictionary<string, object>? options)
+        {
+            if (!PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT)
+            {
+                return currentHeight;
+            }
+
+            try
+            {
+                int minHeight = currentHeight;
+
+                // Fallback order: options.minHeight -> config.snapshot.minHeight -> currentHeight.
+                if (options != null &&
+                    options.TryGetValue("minHeight", out object? minHeightFromOptions) &&
+                    TryGetIntFromValue(minHeightFromOptions, out int parsedOptionsMinHeight))
+                {
+                    minHeight = parsedOptionsMinHeight;
+                }
+                else if (cliConfig is JsonElement configElement &&
+                         configElement.ValueKind == JsonValueKind.Object &&
+                         configElement.TryGetProperty("snapshot", out JsonElement snapshotElement) &&
+                         snapshotElement.ValueKind == JsonValueKind.Object &&
+                         snapshotElement.TryGetProperty("minHeight", out JsonElement minHeightElement) &&
+                         TryGetIntFromValue(minHeightElement, out int parsedConfigMinHeight))
+                {
+                    minHeight = parsedConfigMinHeight;
+                }
+                return minHeight;
+            }
+            catch
+            {
+                return currentHeight;
+            }
+        }
+
+        private static bool TryGetIntFromValue(object? value, out int result)
+        {
+            if (value is int intValue)
+            {
+                result = intValue;
+                return true;
+            }
+
+            if (value is JsonElement element &&
+                element.ValueKind == JsonValueKind.Number &&
+                element.TryGetInt32(out int jsonInt))
+            {
+                result = jsonInt;
+                return true;
+            }
+
+            result = default;
+            return false;
+        }
+
+        private static void WaitForResizeCount(IPage page, int expectedCount, int width)
+        {
+            var start = DateTime.UtcNow;
+            while (DateTime.UtcNow - start < TimeSpan.FromSeconds(1))
+            {
+                int current = PercyPlaywrightDriver.EvaluateSync<int>(page, "window.resizeCount");
+                if (current == expectedCount)
+                {
+                    return;
+                }
+                Thread.Sleep(50);
+            }
+            Log($"Timed out waiting for window resize event for width {width}", "debug");
+        }
+
+        internal static List<object> CaptureResponsiveDom(IPage page, Dictionary<string, object>? options, string cookiesJson)
+        {
+            List<int> userWidths = ParseWidthsFromOptions(options);
+            List<ResponsiveWidth> widthHeights = GetResponsiveWidths(userWidths);
+            var domSnapshots = new List<object>();
+
+            int currentWidth;
+            int currentHeight;
+            var viewportSize = page.ViewportSize;
+            if (viewportSize != null)
+            {
+                currentWidth = viewportSize.Width;
+                currentHeight = viewportSize.Height;
+            }
+            else
+            {
+                currentWidth = PercyPlaywrightDriver.EvaluateSync<int>(page, "window.innerWidth");
+                currentHeight = PercyPlaywrightDriver.EvaluateSync<int>(page, "window.innerHeight");
+            }
+
+            int lastWindowWidth = currentWidth;
+            int lastWindowHeight = currentHeight;
+            int resizeCount = 0;
+            int sleepTime = 0;
+            int defaultHeight = CalculateDefaultHeight(page, currentHeight, options);
+
+            PercyPlaywrightDriver.EvaluateSync<object>(page, "PercyDOM.waitForResize()");
+
+            foreach (ResponsiveWidth widthHeight in widthHeights)
+            {
+                int width = widthHeight.width;
+                int height = widthHeight.height ?? defaultHeight;
+
+                if (lastWindowWidth != width || lastWindowHeight != height)
+                {
+                    resizeCount++;
+                    try
+                    {
+                        PercyPlaywrightDriver.SetViewportSizeSync(page, width, height);
+                    }
+                    catch (Exception error)
+                    {
+                        Log($"Viewport resize failed for width {width}: {error.Message}", "debug");
+                    }
+
+                    WaitForResizeCount(page, resizeCount, width);
+                    lastWindowWidth = width;
+                    lastWindowHeight = height;
+                }
+
+                if (PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)
+                {
+                    try
+                    {
+                        // ReloadAsync has no sync equivalent; block with .GetAwaiter().GetResult() to ensure page is fully loaded before capturing DOM
+                        var reloadTask = page.ReloadAsync();
+                        reloadTask.GetAwaiter().GetResult();
+
+                        if (!PercyPlaywrightDriver.EvaluateSync<bool>(page, "!!window.PercyDOM"))
+                        {
+                            PercyPlaywrightDriver.EvaluateSync<string>(page, GetPercyDOM());
+                        }
+
+                        PercyPlaywrightDriver.EvaluateSync<object>(page, "PercyDOM.waitForResize()");
+                        resizeCount = 0;
+                    }
+                    catch (Exception error)
+                    {
+                        Log($"Page reload failed during responsive capture for width {width}: {error.Message}", "debug");
+                    }
+                }
+
+                if (Int32.TryParse(RESPONSIVE_CAPTURE_SLEEP_TIME, out sleepTime))
+                {
+                    if (sleepTime > 0)
+                    {
+                        Thread.Sleep(TimeSpan.FromSeconds(sleepTime));
+                    }
+                }
+
+                var domSnapshot = GetSerializedDom(page, options, cookiesJson, width);
+                domSnapshots.Add(domSnapshot);
+            }
+
+            try
+            {
+                bool resetChangesViewport = lastWindowWidth != currentWidth || lastWindowHeight != currentHeight;
+                PercyPlaywrightDriver.SetViewportSizeSync(page, currentWidth, currentHeight);
+                if (resetChangesViewport)
+                {
+                    WaitForResizeCount(page, resizeCount + 1, currentWidth);
+                }
+            }
+            catch (Exception error)
+            {
+                Log($"Viewport reset failed: {error.Message}", "debug");
+            }
+
+            return domSnapshots;
+        }
+
+        private static bool IsResponsiveSnapshotCapture(Dictionary<string, object>? options)
+        {
+            if (cliConfig is JsonElement configElement)
+            {
+                if (configElement.ValueKind == JsonValueKind.Object &&
+                    configElement.TryGetProperty("percy", out JsonElement percyElement) &&
+                    percyElement.ValueKind == JsonValueKind.Object &&
+                    percyElement.TryGetProperty("deferUploads", out JsonElement deferUploadsProperty) &&
+                    (deferUploadsProperty.ValueKind == JsonValueKind.True || deferUploadsProperty.ValueKind == JsonValueKind.False))
+                {
+                    if (deferUploadsProperty.GetBoolean())
+                    {
+                        return false;
+                    }
+                }
+
+                if (options != null &&
+                    options.TryGetValue("responsiveSnapshotCapture", out var responsiveOption) &&
+                    responsiveOption is bool responsiveFromOptions &&
+                    responsiveFromOptions)
+                {
+                    return true;
+                }
+
+                if (configElement.ValueKind == JsonValueKind.Object &&
+                    configElement.TryGetProperty("snapshot", out JsonElement snapshotElement) &&
+                    snapshotElement.ValueKind == JsonValueKind.Object &&
+                    snapshotElement.TryGetProperty("responsiveSnapshotCapture", out JsonElement responsiveProperty) &&
+                    (responsiveProperty.ValueKind == JsonValueKind.True || responsiveProperty.ValueKind == JsonValueKind.False))
+                {
+                    return responsiveProperty.GetBoolean();
+                }
+
+                return false;
+            }
+
+            return options != null &&
+                   options.TryGetValue("responsiveSnapshotCapture", out var responsiveOptionNoConfig) &&
+                   responsiveOptionNoConfig is bool responsiveFromOptionsNoConfig &&
+                   responsiveFromOptionsNoConfig;
+        }
+
         // To take percy snapshot
         public static JObject? Snapshot(
             IPage page, string name,
@@ -270,8 +723,12 @@ namespace PercyIO.Playwright
 
                 // Convert IEnumerable to Dictionary for proper JSON serialization
                 var optionsDict = options?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-                string opts = JsonSerializer.Serialize(optionsDict);
-                var domSnapshot = PercyPlaywrightDriver.EvaluateSync<object>(page, $"PercyDOM.serialize({opts})");
+                // CookiesAsync has no sync equivalent; block with .GetAwaiter().GetResult() to fetch cookies before serializing the DOM
+                var cookies = page.Context.CookiesAsync().GetAwaiter().GetResult();
+                string cookiesJson = JsonSerializer.Serialize(cookies);
+                object domSnapshot = IsResponsiveSnapshotCapture(optionsDict)
+                    ? CaptureResponsiveDom(page, optionsDict, cookiesJson)
+                    : GetSerializedDom(page, optionsDict, cookiesJson);
 
                 Options snapshotOptions = new Options {
                     { "clientInfo", CLIENT_INFO },
