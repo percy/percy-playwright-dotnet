@@ -374,12 +374,75 @@ namespace PercyIO.Playwright
             }
         }
 
+        // Readiness gate (PER-7348). Runs PercyDOM.waitForReady via EvaluateSync;
+        // Playwright auto-awaits the returned Promise. Checks typeof in-browser so
+        // older CLI versions without the method are a graceful no-op. Returns
+        // diagnostics to attach to the domSnapshot, or null.
+        private static object? WaitForReady(IPage page, Dictionary<string, object>? options)
+        {
+            string readinessJson = "{}";
+            if (options != null && options.TryGetValue("readiness", out var perSnapshot) && perSnapshot != null)
+            {
+                readinessJson = JsonSerializer.Serialize(perSnapshot);
+            }
+            else if (cliConfig is JsonElement configElement &&
+                     configElement.ValueKind == JsonValueKind.Object &&
+                     configElement.TryGetProperty("snapshot", out JsonElement snapshotElement) &&
+                     snapshotElement.ValueKind == JsonValueKind.Object &&
+                     snapshotElement.TryGetProperty("readiness", out JsonElement readinessElement) &&
+                     readinessElement.ValueKind == JsonValueKind.Object)
+            {
+                readinessJson = readinessElement.GetRawText();
+            }
+
+            // Skip when preset is disabled
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(readinessJson);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("preset", out JsonElement presetElement) &&
+                    presetElement.ValueKind == JsonValueKind.String &&
+                    presetElement.GetString() == "disabled")
+                {
+                    return null;
+                }
+            }
+            catch { /* fall through on malformed JSON */ }
+
+            string script =
+                "(() => {"
+                + $"  var cfg = {readinessJson};"
+                + "  if (typeof PercyDOM !== 'undefined' && typeof PercyDOM.waitForReady === 'function') {"
+                + "    return PercyDOM.waitForReady(cfg);"
+                + "  }"
+                + "  return null;"
+                + "})()";
+            try
+            {
+                return PercyPlaywrightDriver.EvaluateSync<object>(page, script);
+            }
+            catch (Exception e)
+            {
+                Log($"waitForReady failed, proceeding to serialize: {e.Message}", "debug");
+                return null;
+            }
+        }
+
         private static object GetSerializedDom(IPage page, Dictionary<string, object>? options, string cookiesJson, int? width = null)
         {
+            // Readiness gate before serialize (PER-7348). Graceful on old CLI.
+            object? readinessDiagnostics = WaitForReady(page, options);
+
             string opts = JsonSerializer.Serialize(options);
             string widthAssignment = width.HasValue ? $"dom.width = {width.Value};" : "";
             string script = $"(() => {{ const dom = PercyDOM.serialize({opts}); dom.cookies = {cookiesJson}; {widthAssignment} return dom; }})()";
             var domSnapshot = PercyPlaywrightDriver.EvaluateSync<object>(page, script);
+
+            // Attach readiness diagnostics so the CLI can log timing and pass/fail
+            if (readinessDiagnostics != null && domSnapshot is IDictionary<string, object> readinessDict)
+            {
+                readinessDict["readiness_diagnostics"] = readinessDiagnostics;
+            }
 
             // Process CORS IFrames
             try
