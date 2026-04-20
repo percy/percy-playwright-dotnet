@@ -92,7 +92,7 @@ namespace PercyIO.Playwright
         {
             if (_http == null)
             {
-                setHttpClient(new HttpClient());
+                _http = new HttpClient();
                 _http.Timeout = TimeSpan.FromMinutes(10);
             }
 
@@ -193,13 +193,13 @@ namespace PercyIO.Playwright
                 return (bool)(_enabled = false);
             }
         };
-        public class Region 
-        { 
-            public RegionElementSelector elementSelector { get; set; } 
-            public RegionPadding padding { get; set; } 
-            public string algorithm { get; set; } 
-            public RegionConfiguration configuration { get; set; } 
-            public RegionAssertion assertion { get; set; } 
+        public class Region
+        {
+            public RegionElementSelector? elementSelector { get; set; }
+            public RegionPadding? padding { get; set; }
+            public string? algorithm { get; set; }
+            public RegionConfiguration? configuration { get; set; }
+            public RegionAssertion? assertion { get; set; }
 
             // Rename the nested class to RegionElementSelector or another unique name
             public class RegionElementSelector 
