@@ -304,6 +304,107 @@ namespace PercyIO.Playwright
 
         public class Options : Dictionary<string, object> { }
 
+        /// <summary>
+        /// Use CDP to discover closed shadow roots and expose them to PercyDOM.serialize().
+        /// </summary>
+        private static void ExposeClosedShadowRoots(IPage page)
+        {
+            ICDPSession? cdpSession = null;
+            try
+            {
+                cdpSession = page.Context.NewCDPSessionAsync(page).GetAwaiter().GetResult();
+            }
+            catch (Exception err)
+            {
+                Log($"CDP session unavailable: {err.Message}", "debug");
+                return;
+            }
+
+            try
+            {
+                cdpSession.SendAsync("DOM.enable").GetAwaiter().GetResult();
+
+                var docResult = cdpSession.SendAsync("DOM.getDocument", new Dictionary<string, object>
+                {
+                    { "depth", -1 },
+                    { "pierce", true }
+                }).GetAwaiter().GetResult();
+
+                var root = docResult.Value.GetProperty("root");
+
+                var closedPairs = new List<(int hostId, int shadowId)>();
+                WalkNodes(root, closedPairs);
+
+                if (closedPairs.Count == 0) return;
+
+                Log($"Found {closedPairs.Count} closed shadow root(s), exposing via CDP", "debug");
+
+                page.EvaluateAsync("() => { window.__percyClosedShadowRoots = window.__percyClosedShadowRoots || new WeakMap(); }")
+                    .GetAwaiter().GetResult();
+
+                foreach (var (hostId, shadowId) in closedPairs)
+                {
+                    var hostResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
+                    {
+                        { "backendNodeId", hostId }
+                    }).GetAwaiter().GetResult();
+                    var hostObjectId = hostResult.Value.GetProperty("object").GetProperty("objectId").GetString();
+
+                    var shadowResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
+                    {
+                        { "backendNodeId", shadowId }
+                    }).GetAwaiter().GetResult();
+                    var shadowObjectId = shadowResult.Value.GetProperty("object").GetProperty("objectId").GetString();
+
+                    cdpSession.SendAsync("Runtime.callFunctionOn", new Dictionary<string, object>
+                    {
+                        { "functionDeclaration", "function(shadowRoot) { window.__percyClosedShadowRoots.set(this, shadowRoot); }" },
+                        { "objectId", hostObjectId! },
+                        { "arguments", new[] { new Dictionary<string, object> { { "objectId", shadowObjectId! } } } }
+                    }).GetAwaiter().GetResult();
+                }
+            }
+            catch (Exception err)
+            {
+                Log($"Could not expose closed shadow roots via CDP: {err.Message}", "debug");
+            }
+            finally
+            {
+                if (cdpSession != null)
+                {
+                    try { cdpSession.DetachAsync().GetAwaiter().GetResult(); } catch { }
+                }
+            }
+        }
+
+        private static void WalkNodes(JsonElement node, List<(int hostId, int shadowId)> closedPairs)
+        {
+            if (node.TryGetProperty("contentDocument", out _)) return;
+
+            if (node.TryGetProperty("shadowRoots", out var shadowRoots))
+            {
+                foreach (var sr in shadowRoots.EnumerateArray())
+                {
+                    if (sr.TryGetProperty("shadowRootType", out var type) && type.GetString() == "closed")
+                    {
+                        closedPairs.Add((
+                            node.GetProperty("backendNodeId").GetInt32(),
+                            sr.GetProperty("backendNodeId").GetInt32()
+                        ));
+                    }
+                    WalkNodes(sr, closedPairs);
+                }
+            }
+
+            if (node.TryGetProperty("children", out var children))
+            {
+                foreach (var child in children.EnumerateArray())
+                {
+                    WalkNodes(child, closedPairs);
+                }
+            }
+        }
+
         private static bool IsCrossOriginFrame(string frameUrl, string pageUrl)
         {
             if (frameUrl == "about:blank")
@@ -720,6 +821,9 @@ namespace PercyIO.Playwright
             {
                 if (PercyPlaywrightDriver.EvaluateSync<bool>(page, "!!window.PercyDOM") == false)
                     PercyPlaywrightDriver.EvaluateSync<string>(page, GetPercyDOM());
+
+                // Expose closed shadow roots via CDP before serialization
+                ExposeClosedShadowRoots(page);
 
                 // Convert IEnumerable to Dictionary for proper JSON serialization
                 var optionsDict = options?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
