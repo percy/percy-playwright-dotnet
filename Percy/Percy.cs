@@ -665,6 +665,34 @@ namespace PercyIO.Playwright
             return domSnapshots;
         }
 
+        private static Dictionary<string, object> MergeSnapshotOptions(Dictionary<string, object>? options)
+        {
+            var merged = new Dictionary<string, object>();
+            if (cliConfig is JsonElement configElement &&
+                configElement.ValueKind == JsonValueKind.Object &&
+                configElement.TryGetProperty("snapshot", out JsonElement snapshotElement) &&
+                snapshotElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (JsonProperty prop in snapshotElement.EnumerateObject())
+                {
+                    merged[prop.Name] = prop.Value.ValueKind switch
+                    {
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        JsonValueKind.Number => prop.Value.TryGetInt32(out int intVal) ? intVal : (object)prop.Value.GetDouble(),
+                        JsonValueKind.String => prop.Value.GetString(),
+                        _ => prop.Value
+                    };
+                }
+            }
+            if (options != null)
+            {
+                foreach (var kvp in options)
+                    merged[kvp.Key] = kvp.Value;
+            }
+            return merged;
+        }
+
         private static bool IsResponsiveSnapshotCapture(Dictionary<string, object>? options)
         {
             if (cliConfig is JsonElement configElement)
@@ -723,12 +751,16 @@ namespace PercyIO.Playwright
 
                 // Convert IEnumerable to Dictionary for proper JSON serialization
                 var optionsDict = options?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
+                // Merge .percy.yml config options with snapshot options (snapshot options take priority)
+                var mergedOptions = MergeSnapshotOptions(optionsDict);
+
                 // CookiesAsync has no sync equivalent; block with .GetAwaiter().GetResult() to fetch cookies before serializing the DOM
                 var cookies = page.Context.CookiesAsync().GetAwaiter().GetResult();
                 string cookiesJson = JsonSerializer.Serialize(cookies);
-                object domSnapshot = IsResponsiveSnapshotCapture(optionsDict)
-                    ? CaptureResponsiveDom(page, optionsDict, cookiesJson)
-                    : GetSerializedDom(page, optionsDict, cookiesJson);
+                object domSnapshot = IsResponsiveSnapshotCapture(mergedOptions)
+                    ? CaptureResponsiveDom(page, mergedOptions, cookiesJson)
+                    : GetSerializedDom(page, mergedOptions, cookiesJson);
 
                 Options snapshotOptions = new Options {
                     { "clientInfo", CLIENT_INFO },
