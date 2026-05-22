@@ -88,14 +88,25 @@ namespace PercyIO.Playwright
             _http = client;
         }
 
+        private static readonly object _httpLock = new object();
+
         internal static HttpClient getHttpClient()
         {
+            // Double-checked locking — concurrent first-callers must not observe an
+            // _http with its default timeout (we set Timeout AFTER assigning the
+            // field, so without the lock another thread could grab the half-built
+            // client). Matches the pattern in Percy.Selenium.
             if (_http == null)
             {
-                setHttpClient(new HttpClient());
-                _http.Timeout = TimeSpan.FromMinutes(10);
+                lock (_httpLock)
+                {
+                    if (_http == null)
+                    {
+                        var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+                        _http = client;
+                    }
+                }
             }
-
             return _http;
         }
 
@@ -405,10 +416,22 @@ namespace PercyIO.Playwright
             }
         }
 
+        // Schemes whose iframe content can't be (or shouldn't be) captured —
+        // matches Percy.Selenium's IsUnsupportedIframeSrc. Lower-case prefix match.
+        private static readonly string[] _unsupportedIframeSchemes = new[]
+        {
+            "about:", "chrome:", "chrome-extension:", "devtools:", "edge:",
+            "opera:", "view-source:", "data:", "javascript:", "vbscript:", "blob:"
+        };
+
         private static bool IsCrossOriginFrame(string frameUrl, string pageUrl)
         {
-            if (frameUrl == "about:blank")
-                return false;
+            if (string.IsNullOrEmpty(frameUrl)) return false;
+            var lower = frameUrl.ToLowerInvariant();
+            foreach (var prefix in _unsupportedIframeSchemes)
+            {
+                if (lower.StartsWith(prefix)) return false;
+            }
 
             try
             {
