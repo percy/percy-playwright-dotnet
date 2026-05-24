@@ -1033,6 +1033,13 @@ namespace PercyIO.Playwright.Tests
         }
     }
 
+    // Serialize HttpClient state mutations: these tests null out Percy's static
+    // _http field via reflection. Without a [Collection] gate, xUnit may run them
+    // in parallel with other test classes that also touch Percy's static HTTP
+    // state (UnitTests / CookiesCaptureTests / ResponsiveCaptureTests /
+    // CorsIframeIntegrationTests — all members of "PercySerialTests"), racing
+    // the field clearing against an in-flight Request() call.
+    [Collection("PercySerialTests")]
     public class HttpClientInitTests
     {
         [Fact]
@@ -1071,6 +1078,196 @@ namespace PercyIO.Playwright.Tests
             // Same instance — the DCL pattern must NOT build a new client per
             // call once one is published.
             Assert.Same(first, second);
+        }
+
+        [Fact]
+        public void GetHttpClient_SerializedCollectionSmoke()
+        {
+            // Smoke test confirming the [Collection("PercySerialTests")] gate on
+            // this class still lets a basic getHttpClient() call succeed even when
+            // running serialized with the rest of the Percy-state-mutating tests.
+            // If this ever fails it points at a regression in the serialization
+            // setup itself, not the DCL logic.
+            var method = typeof(Percy).GetMethod("getHttpClient",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(method);
+            var client = (HttpClient)method!.Invoke(null, null)!;
+            Assert.NotNull(client);
+        }
+    }
+
+    // ─── WalkNodes (closed shadow root discovery) Unit Tests ──────────────────
+
+    public class WalkNodesTests
+    {
+        // WalkNodes' signature is (JsonElement, List<(int, int)>, string).
+        // ValueTuple parameters survive reflection round-trips fine — invoke
+        // it with a synthesized CDP DOM payload to assert the same-origin
+        // iframe recursion path.
+        private static List<(int hostId, int shadowId)> InvokeWalkNodes(string json, string pageUrl)
+        {
+            var doc = JsonDocument.Parse(json);
+            var pairs = new List<(int hostId, int shadowId)>();
+            var method = typeof(Percy).GetMethod(
+                "WalkNodes",
+                BindingFlags.NonPublic | BindingFlags.Static
+            );
+            Assert.NotNull(method);
+            method!.Invoke(null, new object[] { doc.RootElement, pairs, pageUrl });
+            return pairs;
+        }
+
+        [Fact]
+        public void SameOriginIframe_ContentDocumentClosedShadowRoots_AreCollected()
+        {
+            // A CDP DOM tree containing an iframe whose contentDocument is
+            // same-origin (documentURL host == pageUrl host) and whose body
+            // hosts a closed shadow root. WalkNodes must recurse INTO that
+            // contentDocument and add the (host, shadowRoot) pair — without
+            // this fix the iframe node would short-circuit on the
+            // contentDocument check and the closed shadow root would be lost.
+            string json = @"{
+                ""backendNodeId"": 1,
+                ""nodeName"": ""#document"",
+                ""children"": [
+                    {
+                        ""backendNodeId"": 2,
+                        ""nodeName"": ""IFRAME"",
+                        ""contentDocument"": {
+                            ""backendNodeId"": 3,
+                            ""nodeName"": ""#document"",
+                            ""documentURL"": ""http://localhost:5338/inner"",
+                            ""children"": [
+                                {
+                                    ""backendNodeId"": 4,
+                                    ""nodeName"": ""DIV"",
+                                    ""shadowRoots"": [
+                                        {
+                                            ""backendNodeId"": 5,
+                                            ""shadowRootType"": ""closed""
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }";
+
+            var pairs = InvokeWalkNodes(json, "http://localhost:5338/outer");
+
+            Assert.Single(pairs);
+            Assert.Equal(4, pairs[0].hostId);
+            Assert.Equal(5, pairs[0].shadowId);
+        }
+
+        [Fact]
+        public void CrossOriginIframe_ContentDocumentClosedShadowRoots_AreSkipped()
+        {
+            // Same payload shape but the iframe's documentURL is on a different
+            // host — cross-origin contentDocument lives in its own JS realm,
+            // so the parent-page WeakMap can't reach it. WalkNodes must NOT
+            // recurse and the closed shadow pair must NOT be collected here
+            // (the per-frame ProcessFrame path handles it instead).
+            string json = @"{
+                ""backendNodeId"": 1,
+                ""nodeName"": ""#document"",
+                ""children"": [
+                    {
+                        ""backendNodeId"": 2,
+                        ""nodeName"": ""IFRAME"",
+                        ""contentDocument"": {
+                            ""backendNodeId"": 3,
+                            ""nodeName"": ""#document"",
+                            ""documentURL"": ""http://other.example.com/inner"",
+                            ""children"": [
+                                {
+                                    ""backendNodeId"": 4,
+                                    ""nodeName"": ""DIV"",
+                                    ""shadowRoots"": [
+                                        {
+                                            ""backendNodeId"": 5,
+                                            ""shadowRootType"": ""closed""
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }";
+
+            var pairs = InvokeWalkNodes(json, "http://localhost:5338/outer");
+
+            Assert.Empty(pairs);
+        }
+
+        [Fact]
+        public void TopLevelClosedShadowRoot_StillCollected()
+        {
+            // Regression guard: the new contentDocument branch must not
+            // break the original top-level shadow-root collection.
+            string json = @"{
+                ""backendNodeId"": 1,
+                ""nodeName"": ""#document"",
+                ""children"": [
+                    {
+                        ""backendNodeId"": 10,
+                        ""nodeName"": ""DIV"",
+                        ""shadowRoots"": [
+                            {
+                                ""backendNodeId"": 11,
+                                ""shadowRootType"": ""closed""
+                            }
+                        ]
+                    }
+                ]
+            }";
+
+            var pairs = InvokeWalkNodes(json, "http://localhost:5338/page");
+
+            Assert.Single(pairs);
+            Assert.Equal(10, pairs[0].hostId);
+            Assert.Equal(11, pairs[0].shadowId);
+        }
+
+        [Fact]
+        public void OpenShadowRoot_InSameOriginIframe_IsNotCollected()
+        {
+            // Same-origin iframe with an OPEN shadow root — open roots don't
+            // need WeakMap exposure (PercyDOM serializes them natively), so
+            // even though we recurse, only closed roots should be collected.
+            string json = @"{
+                ""backendNodeId"": 1,
+                ""nodeName"": ""#document"",
+                ""children"": [
+                    {
+                        ""backendNodeId"": 2,
+                        ""nodeName"": ""IFRAME"",
+                        ""contentDocument"": {
+                            ""backendNodeId"": 3,
+                            ""nodeName"": ""#document"",
+                            ""documentURL"": ""http://localhost:5338/inner"",
+                            ""children"": [
+                                {
+                                    ""backendNodeId"": 4,
+                                    ""nodeName"": ""DIV"",
+                                    ""shadowRoots"": [
+                                        {
+                                            ""backendNodeId"": 5,
+                                            ""shadowRootType"": ""open""
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }";
+
+            var pairs = InvokeWalkNodes(json, "http://localhost:5338/outer");
+
+            Assert.Empty(pairs);
         }
     }
 
