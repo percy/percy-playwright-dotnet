@@ -326,7 +326,7 @@ namespace PercyIO.Playwright
             ICDPSession? cdpSession = null;
             try
             {
-                cdpSession = page.Context.NewCDPSessionAsync(page).GetAwaiter().GetResult();
+                cdpSession = page.Context.NewCDPSessionAsync(page).ConfigureAwait(false).GetAwaiter().GetResult();
             }
             catch (Exception err)
             {
@@ -336,13 +336,13 @@ namespace PercyIO.Playwright
 
             try
             {
-                cdpSession.SendAsync("DOM.enable").GetAwaiter().GetResult();
+                cdpSession.SendAsync("DOM.enable").ConfigureAwait(false).GetAwaiter().GetResult();
 
                 var docResult = cdpSession.SendAsync("DOM.getDocument", new Dictionary<string, object>
                 {
                     { "depth", -1 },
                     { "pierce", true }
-                }).GetAwaiter().GetResult();
+                }).ConfigureAwait(false).GetAwaiter().GetResult();
 
                 var root = docResult.Value.GetProperty("root");
 
@@ -354,7 +354,7 @@ namespace PercyIO.Playwright
                 Log($"Found {closedPairs.Count} closed shadow root(s), exposing via CDP", "debug");
 
                 page.EvaluateAsync("() => { window.__percyClosedShadowRoots = window.__percyClosedShadowRoots || new WeakMap(); }")
-                    .GetAwaiter().GetResult();
+                    .ConfigureAwait(false).GetAwaiter().GetResult();
 
                 foreach (var (hostId, shadowId) in closedPairs)
                 {
@@ -368,7 +368,7 @@ namespace PercyIO.Playwright
                         var hostResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
                         {
                             { "backendNodeId", hostId }
-                        }).GetAwaiter().GetResult();
+                        }).ConfigureAwait(false).GetAwaiter().GetResult();
                         if (!hostResult.HasValue ||
                             !hostResult.Value.TryGetProperty("object", out JsonElement hostObj) ||
                             !hostObj.TryGetProperty("objectId", out JsonElement hostIdEl))
@@ -378,7 +378,7 @@ namespace PercyIO.Playwright
                         var shadowResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
                         {
                             { "backendNodeId", shadowId }
-                        }).GetAwaiter().GetResult();
+                        }).ConfigureAwait(false).GetAwaiter().GetResult();
                         if (!shadowResult.HasValue ||
                             !shadowResult.Value.TryGetProperty("object", out JsonElement shadowObj) ||
                             !shadowObj.TryGetProperty("objectId", out JsonElement shadowIdEl))
@@ -392,7 +392,7 @@ namespace PercyIO.Playwright
                             { "functionDeclaration", "function(shadowRoot) { window.__percyClosedShadowRoots.set(this, shadowRoot); }" },
                             { "objectId", hostObjectId },
                             { "arguments", new[] { new Dictionary<string, object> { { "objectId", shadowObjectId } } } }
-                        }).GetAwaiter().GetResult();
+                        }).ConfigureAwait(false).GetAwaiter().GetResult();
                     }
                     catch (Exception perPairErr)
                     {
@@ -408,7 +408,7 @@ namespace PercyIO.Playwright
             {
                 if (cdpSession != null)
                 {
-                    try { cdpSession.DetachAsync().GetAwaiter().GetResult(); } catch { }
+                    try { cdpSession.DetachAsync().ConfigureAwait(false).GetAwaiter().GetResult(); } catch { }
                 }
             }
         }
@@ -478,7 +478,7 @@ namespace PercyIO.Playwright
             {
                 // Inject Percy DOM into the cross-origin frame
                 // .GetAwaiter().GetResult() is used to block synchronously; EvaluateSync is not available for IFrame, only IPage
-                frame.EvaluateAsync(percyDomScript).GetAwaiter().GetResult();
+                frame.EvaluateAsync(percyDomScript).ConfigureAwait(false).GetAwaiter().GetResult();
 
                 // enableJavaScript=True prevents the standard iframe serialization logic from running.
                 // This is necessary because we're manually handling cross-origin iframe serialization here.
@@ -488,7 +488,7 @@ namespace PercyIO.Playwright
                 // Serialize the frame
                 string serializeScript = $"PercyDOM.serialize({JsonSerializer.Serialize(optionsForFrame)})";
                 // .GetAwaiter().GetResult() is used to block synchronously; EvaluateSync is not available for IFrame, only IPage
-                var iframeSnapshot = frame.EvaluateAsync(serializeScript).GetAwaiter().GetResult();
+                var iframeSnapshot = frame.EvaluateAsync(serializeScript).ConfigureAwait(false).GetAwaiter().GetResult();
 
                 // Get the iframe's element data from the main page context
                 string getDataScript = "(fUrl) => {\n" +
@@ -769,7 +769,7 @@ namespace PercyIO.Playwright
                     {
                         // ReloadAsync has no sync equivalent; block with .GetAwaiter().GetResult() to ensure page is fully loaded before capturing DOM
                         var reloadTask = page.ReloadAsync();
-                        reloadTask.GetAwaiter().GetResult();
+                        reloadTask.ConfigureAwait(false).GetAwaiter().GetResult();
 
                         if (!PercyPlaywrightDriver.EvaluateSync<bool>(page, "!!window.PercyDOM"))
                         {
@@ -876,7 +876,7 @@ namespace PercyIO.Playwright
                 // Convert IEnumerable to Dictionary for proper JSON serialization
                 var optionsDict = options?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
                 // CookiesAsync has no sync equivalent; block with .GetAwaiter().GetResult() to fetch cookies before serializing the DOM
-                var cookies = page.Context.CookiesAsync().GetAwaiter().GetResult();
+                var cookies = page.Context.CookiesAsync().ConfigureAwait(false).GetAwaiter().GetResult();
                 string cookiesJson = JsonSerializer.Serialize(cookies);
                 object domSnapshot = IsResponsiveSnapshotCapture(optionsDict)
                     ? CaptureResponsiveDom(page, optionsDict, cookiesJson)
