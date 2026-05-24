@@ -60,7 +60,10 @@ namespace PercyIO.Playwright
             }
         }
 
-        private static HttpClient? _http;
+        // volatile so the unlocked read in getHttpClient sees a fully-published
+        // HttpClient (Timeout set) before the field reference becomes visible
+        // to other threads on weak memory models (e.g. ARM).
+        private static volatile HttpClient? _http;
 
         private static string? sessionType = null;
         private static object? cliConfig;
@@ -355,24 +358,46 @@ namespace PercyIO.Playwright
 
                 foreach (var (hostId, shadowId) in closedPairs)
                 {
-                    var hostResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
+                    // Per-pair try/catch: if a single host went detached between
+                    // DOM.getDocument and resolveNode (TOCTOU), an unchecked
+                    // GetProperty would throw KeyNotFoundException and abort
+                    // exposure for every remaining pair. Skip the bad one and
+                    // keep going so partial capture still wins.
+                    try
                     {
-                        { "backendNodeId", hostId }
-                    }).GetAwaiter().GetResult();
-                    var hostObjectId = hostResult.Value.GetProperty("object").GetProperty("objectId").GetString();
+                        var hostResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
+                        {
+                            { "backendNodeId", hostId }
+                        }).GetAwaiter().GetResult();
+                        if (!hostResult.HasValue ||
+                            !hostResult.Value.TryGetProperty("object", out JsonElement hostObj) ||
+                            !hostObj.TryGetProperty("objectId", out JsonElement hostIdEl))
+                            continue;
+                        var hostObjectId = hostIdEl.GetString();
 
-                    var shadowResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
-                    {
-                        { "backendNodeId", shadowId }
-                    }).GetAwaiter().GetResult();
-                    var shadowObjectId = shadowResult.Value.GetProperty("object").GetProperty("objectId").GetString();
+                        var shadowResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
+                        {
+                            { "backendNodeId", shadowId }
+                        }).GetAwaiter().GetResult();
+                        if (!shadowResult.HasValue ||
+                            !shadowResult.Value.TryGetProperty("object", out JsonElement shadowObj) ||
+                            !shadowObj.TryGetProperty("objectId", out JsonElement shadowIdEl))
+                            continue;
+                        var shadowObjectId = shadowIdEl.GetString();
 
-                    cdpSession.SendAsync("Runtime.callFunctionOn", new Dictionary<string, object>
+                        if (hostObjectId == null || shadowObjectId == null) continue;
+
+                        cdpSession.SendAsync("Runtime.callFunctionOn", new Dictionary<string, object>
+                        {
+                            { "functionDeclaration", "function(shadowRoot) { window.__percyClosedShadowRoots.set(this, shadowRoot); }" },
+                            { "objectId", hostObjectId },
+                            { "arguments", new[] { new Dictionary<string, object> { { "objectId", shadowObjectId } } } }
+                        }).GetAwaiter().GetResult();
+                    }
+                    catch (Exception perPairErr)
                     {
-                        { "functionDeclaration", "function(shadowRoot) { window.__percyClosedShadowRoots.set(this, shadowRoot); }" },
-                        { "objectId", hostObjectId! },
-                        { "arguments", new[] { new Dictionary<string, object> { { "objectId", shadowObjectId! } } } }
-                    }).GetAwaiter().GetResult();
+                        Log($"Failed to expose one closed shadow root: {perPairErr.Message}", "debug");
+                    }
                 }
             }
             catch (Exception err)
