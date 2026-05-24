@@ -996,6 +996,82 @@ namespace PercyIO.Playwright.Tests
                 "http://localhost:5338/test/snapshot"
             ));
         }
+
+        // The expanded unsupported-scheme list: every entry should short-circuit
+        // to false (not cross-origin) so we never try to treat the iframe as a
+        // CORS-capturable target. Mirrors the JS SDKs' isUnsupportedIframeSrc.
+        [Theory]
+        [InlineData("chrome://settings/")]
+        [InlineData("chrome-extension://abcdef/popup.html")]
+        [InlineData("devtools://inspect")]
+        [InlineData("edge://favorites")]
+        [InlineData("opera://about")]
+        [InlineData("view-source:https://example.com")]
+        [InlineData("data:text/html,<h1>hi</h1>")]
+        [InlineData("javascript:void(0)")]
+        [InlineData("vbscript:msgbox")]
+        [InlineData("blob:https://example.com/uuid")]
+        public void UnsupportedSchemeIsTreatedAsNotCrossOrigin(string frameUrl)
+        {
+            Assert.False(InvokeIsCrossOriginFrame(frameUrl, "https://example.com/"));
+        }
+
+        [Fact]
+        public void EmptyFrameUrlIsNotCrossOrigin()
+        {
+            Assert.False(InvokeIsCrossOriginFrame("", "https://example.com/"));
+        }
+
+        [Fact]
+        public void UnsupportedSchemeIsCaseInsensitive()
+        {
+            // Real-world frame URLs sometimes carry uppercase scheme parts
+            // (ABOUT:Blank from some legacy browsers); ToLowerInvariant in
+            // IsCrossOriginFrame must catch them.
+            Assert.False(InvokeIsCrossOriginFrame("ABOUT:Blank", "https://example.com/"));
+            Assert.False(InvokeIsCrossOriginFrame("JavaScript:void(0)", "https://example.com/"));
+        }
+    }
+
+    public class HttpClientInitTests
+    {
+        [Fact]
+        public void GetHttpClient_AlwaysReturnsClientWithTenMinuteTimeout()
+        {
+            // Reset to force getHttpClient's first-caller path. The DCL behind
+            // the volatile _http field must hand back a fully-initialized client
+            // whose Timeout is already set — this is the invariant the
+            // volatile keyword exists to preserve under contention.
+            var field = typeof(Percy).GetField("_http",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(field);
+            field!.SetValue(null, null);
+
+            var method = typeof(Percy).GetMethod("getHttpClient",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(method);
+            var client = (HttpClient)method!.Invoke(null, null)!;
+
+            Assert.NotNull(client);
+            Assert.Equal(TimeSpan.FromMinutes(10), client.Timeout);
+        }
+
+        [Fact]
+        public void GetHttpClient_IsIdempotentAcrossCalls()
+        {
+            var field = typeof(Percy).GetField("_http",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            field!.SetValue(null, null);
+
+            var method = typeof(Percy).GetMethod("getHttpClient",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            var first = method!.Invoke(null, null);
+            var second = method.Invoke(null, null);
+
+            // Same instance — the DCL pattern must NOT build a new client per
+            // call once one is published.
+            Assert.Same(first, second);
+        }
     }
 
     // ─── Region Tests ──────────────────────────────────────────────────────────
