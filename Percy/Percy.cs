@@ -347,7 +347,14 @@ namespace PercyIO.Playwright
                 var root = docResult.Value.GetProperty("root");
 
                 var closedPairs = new List<(int hostId, int shadowId)>();
-                WalkNodes(root, closedPairs);
+                // Pass the page URL so WalkNodes can decide whether to recurse INTO
+                // an iframe's contentDocument: same-origin iframes share the parent
+                // page's JS realm + WeakMap, so closed shadow roots inside them must
+                // be collected too. Cross-origin iframes do NOT share the realm and
+                // are skipped entirely (their closed shadow roots are handled by the
+                // per-frame ProcessFrame path).
+                string pageUrl = page.Url ?? string.Empty;
+                WalkNodes(root, closedPairs, pageUrl);
 
                 if (closedPairs.Count == 0) return;
 
@@ -413,9 +420,34 @@ namespace PercyIO.Playwright
             }
         }
 
-        private static void WalkNodes(JsonElement node, List<(int hostId, int shadowId)> closedPairs)
+        private static void WalkNodes(JsonElement node, List<(int hostId, int shadowId)> closedPairs, string pageUrl)
         {
-            if (node.TryGetProperty("contentDocument", out _)) return;
+            // Same-origin iframe contentDocument trees: their closed shadow roots
+            // live in the parent page's JS realm, so PercyDOM.serialize() at the
+            // parent level needs them in window.__percyClosedShadowRoots too. We
+            // recurse INTO contentDocument only when same-origin; cross-origin
+            // frames have a separate realm and a separate WeakMap, so the per-frame
+            // ProcessFrame path handles them.
+            if (node.TryGetProperty("contentDocument", out var contentDoc))
+            {
+                string frameDocUrl = null!;
+                if (contentDoc.ValueKind == JsonValueKind.Object &&
+                    contentDoc.TryGetProperty("documentURL", out var docUrlEl) &&
+                    docUrlEl.ValueKind == JsonValueKind.String)
+                {
+                    frameDocUrl = docUrlEl.GetString() ?? string.Empty;
+                }
+
+                // IsCrossOriginFrame returns false for empty / unsupported schemes
+                // (about:blank, data:, blob:, etc.) — treat those as same-origin
+                // and recurse, matching the JS SDK behaviour.
+                if (!string.IsNullOrEmpty(pageUrl) &&
+                    !IsCrossOriginFrame(frameDocUrl ?? string.Empty, pageUrl))
+                {
+                    WalkNodes(contentDoc, closedPairs, pageUrl);
+                }
+                return;
+            }
 
             if (node.TryGetProperty("shadowRoots", out var shadowRoots))
             {
@@ -428,7 +460,7 @@ namespace PercyIO.Playwright
                             sr.GetProperty("backendNodeId").GetInt32()
                         ));
                     }
-                    WalkNodes(sr, closedPairs);
+                    WalkNodes(sr, closedPairs, pageUrl);
                 }
             }
 
@@ -436,7 +468,7 @@ namespace PercyIO.Playwright
             {
                 foreach (var child in children.EnumerateArray())
                 {
-                    WalkNodes(child, closedPairs);
+                    WalkNodes(child, closedPairs, pageUrl);
                 }
             }
         }
