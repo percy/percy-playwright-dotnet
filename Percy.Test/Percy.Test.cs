@@ -240,7 +240,7 @@ namespace PercyIO.Playwright.Tests
             Percy.Enabled = oldEnabledFn;
         }
 
-        // ─── Readiness gate (PER-7348) ─────────────────────────────────────
+        // ─── Readiness gate ─────────────────────────────────────
 
         [Fact]
         public void PostsSnapshotWithReadinessEnabled()

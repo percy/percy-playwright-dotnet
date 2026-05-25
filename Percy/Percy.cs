@@ -374,7 +374,7 @@ namespace PercyIO.Playwright
             }
         }
 
-        // Readiness gate (PER-7348). Runs PercyDOM.waitForReady via EvaluateSync;
+        // Readiness gate. Runs PercyDOM.waitForReady via EvaluateSync;
         // Playwright auto-awaits the returned Promise. Checks typeof in-browser so
         // older CLI versions without the method are a graceful no-op. Returns
         // diagnostics to attach to the domSnapshot, or null.
@@ -430,7 +430,7 @@ namespace PercyIO.Playwright
 
         private static object GetSerializedDom(IPage page, Dictionary<string, object>? options, string cookiesJson, int? width = null)
         {
-            // Readiness gate before serialize (PER-7348). Graceful on old CLI.
+            // Readiness gate before serialize. Graceful on old CLI.
             object? readinessDiagnostics = WaitForReady(page, options);
 
             string opts = JsonSerializer.Serialize(options);
