@@ -19,6 +19,10 @@ namespace PercyIO.Playwright
     {
         public static readonly bool DEBUG =
             Environment.GetEnvironmentVariable("PERCY_LOGLEVEL") == "debug";
+        // Behavior-preserving seam: internal code reads debug-level through this mirror,
+        // which defaults to the public env-derived DEBUG flag (unchanged behavior). Tests
+        // can flip it to exercise the debug-only logging branches without setting env vars.
+        internal static bool DebugEnabled = DEBUG;
         public static readonly string CLI_API =
             Environment.GetEnvironmentVariable("PERCY_CLI_API") ?? "http://localhost:5338";
         public static readonly string CLIENT_INFO =
@@ -29,7 +33,7 @@ namespace PercyIO.Playwright
 
         private static void Log<T>(T message, string lvl = "info")
         {
-            string label = DEBUG ? "percy:dotnet" : "percy";
+            string label = DebugEnabled ? "percy:dotnet" : "percy";
             string plainMessage = $"[{label}] {message}";
             string ansiMessage = $"[\u001b[35m{label}\u001b[39m] {message}";
             // Send log message to Percy CLI
@@ -44,7 +48,7 @@ namespace PercyIO.Playwright
             }
             catch (Exception e)
             {
-                if (DEBUG)
+                if (DebugEnabled)
                     Console.Error.WriteLine($"[{label}] Sending log to CLI failed: {e.Message}");
             }
             finally
@@ -53,7 +57,7 @@ namespace PercyIO.Playwright
                 // 1. stderr is unbuffered by default, so output appears immediately even inside catch/finally blocks.
                 // 2. Tools like `npx percy exec` forward stderr directly to the terminal, whereas stdout can be
                 //    swallowed or delayed when the process exits before the buffer is flushed.
-                if (lvl != "debug" || DEBUG)
+                if (lvl != "debug" || DebugEnabled)
                 {
                     Console.Error.WriteLine(plainMessage);
                 }
@@ -73,6 +77,16 @@ namespace PercyIO.Playwright
         public static readonly bool PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE =
             (Environment.GetEnvironmentVariable("PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE") ?? "")
                 .Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        // Behavior-preserving seams for the three responsive-capture feature flags.
+        // The public readonly fields above remain the canonical, env-derived values
+        // (unchanged public API). Production code reads through these internal mirrors,
+        // which default to exactly those env values, so runtime behavior is identical.
+        // Tests can flip a mirror to exercise an otherwise env-gated branch without
+        // mutating process environment or relying on type-initialization ordering.
+        internal static string? ResponsiveCaptureSleepTime = RESPONSIVE_CAPTURE_SLEEP_TIME;
+        internal static bool ResponsiveCaptureMinHeight = PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT;
+        internal static bool ResponsiveCaptureReloadPage = PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE;
 
         private static string PayloadParser(object? payload = null, bool alreadyJson = false)
         {
@@ -189,7 +203,7 @@ namespace PercyIO.Playwright
             catch (Exception error)
             {
                 Log("Percy is not running, disabling snapshots");
-                if (DEBUG) Log<Exception>(error);
+                if (DebugEnabled) Log<Exception>(error);
                 return (bool)(_enabled = false);
             }
         };
@@ -559,7 +573,7 @@ namespace PercyIO.Playwright
 
         private static int CalculateDefaultHeight(IPage page, int currentHeight, Dictionary<string, object>? options)
         {
-            if (!PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT)
+            if (!ResponsiveCaptureMinHeight)
             {
                 return currentHeight;
             }
@@ -677,7 +691,7 @@ namespace PercyIO.Playwright
                     lastWindowHeight = height;
                 }
 
-                if (PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE)
+                if (ResponsiveCaptureReloadPage)
                 {
                     try
                     {
@@ -699,7 +713,7 @@ namespace PercyIO.Playwright
                     }
                 }
 
-                if (Int32.TryParse(RESPONSIVE_CAPTURE_SLEEP_TIME, out sleepTime))
+                if (Int32.TryParse(ResponsiveCaptureSleepTime, out sleepTime))
                 {
                     if (sleepTime > 0)
                     {

@@ -3,12 +3,15 @@ using Microsoft.Playwright;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("Percy.Test")]
 
 namespace PercyIO.Playwright
 {
     internal class PercyPlaywrightDriver : IPercyPlaywrightDriver
     {
-        private IPage page;
+        protected IPage page;
         private static Cache<string, object> cache = new Cache<string, object>();
 
         internal PercyPlaywrightDriver(IPage page)
@@ -40,7 +43,7 @@ namespace PercyIO.Playwright
             string browserGuid = GetBrowserGuid();
             if (cache.Get(browserGuid) == null)
             {
-                string sessionDetailsJson = PercyPlaywrightDriver.EvaluateSync<string>(this.page, "_ => {}", "browserstack_executor: {\"action\":\"getSessionDetails\"}");
+                string sessionDetailsJson = FetchSessionDetails();
                 var sessionDetails = JsonSerializer.Deserialize<JsonElement>(sessionDetailsJson);
                 sessionDetails.TryGetProperty("hashed_id", out JsonElement hashedIdElement);
                 cache.Store(browserGuid, hashedIdElement.GetString());
@@ -48,7 +51,20 @@ namespace PercyIO.Playwright
             return (string)cache.Get(browserGuid);
         }
 
-        private string GetBrowserGuid()
+        // Executes the BrowserStack Automate "getSessionDetails" executor over the
+        // live CDP/WebSocket bridge. Extracted into a protected virtual method so the
+        // session-id caching/parsing logic in GetSessionId can be exercised without a
+        // real Automate session. Production behavior is unchanged: GetSessionId still
+        // calls EvaluateSync against the page exactly as before.
+        protected virtual string FetchSessionDetails()
+        {
+            return PercyPlaywrightDriver.EvaluateSync<string>(this.page, "_ => {}", "browserstack_executor: {\"action\":\"getSessionDetails\"}");
+        }
+
+        // Reflects into Playwright's internal browser implementation to read its Guid.
+        // Marked protected virtual so tests can supply a deterministic guid without a
+        // live browser; production callers reach the same reflection path as before.
+        protected virtual string GetBrowserGuid()
         {
             Type browserImplType = this.page.Context.Browser.GetType().BaseType;
             FieldInfo guidField = browserImplType.GetField("<Guid>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
