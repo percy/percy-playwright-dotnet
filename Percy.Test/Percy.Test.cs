@@ -1041,6 +1041,75 @@ namespace PercyIO.Playwright.Tests
         }
     }
 
+    // ─── Config ⇄ Per-Snapshot Merge Precedence Tests ─────────────────────────
+
+    public class MergeSnapshotOptionsTests
+    {
+        // Seeds Percy's private cliConfig with a `.percy.yml`-style snapshot block via the
+        // internal setCliConfig hook (reached by reflection, the same technique CorsFrameTests
+        // uses for non-public members). No real browser is involved.
+        private static void SetCliConfigSnapshot(string snapshotJson)
+        {
+            var configJson = $"{{\"snapshot\":{snapshotJson}}}";
+            using JsonDocument doc = JsonDocument.Parse(configJson);
+            JsonElement config = doc.RootElement.Clone();
+
+            MethodInfo? setCliConfig = typeof(Percy).GetMethod(
+                "setCliConfig",
+                BindingFlags.NonPublic | BindingFlags.Static
+            );
+            Assert.NotNull(setCliConfig);
+            setCliConfig!.Invoke(null, new object[] { config });
+        }
+
+        private static void ResetCliConfig()
+        {
+            FieldInfo? cliConfigField = typeof(Percy).GetField(
+                "cliConfig",
+                BindingFlags.NonPublic | BindingFlags.Static
+            );
+            cliConfigField?.SetValue(null, null);
+        }
+
+        private static Dictionary<string, object> InvokeMergeSnapshotOptions(Dictionary<string, object>? options)
+        {
+            MethodInfo? merge = typeof(Percy).GetMethod(
+                "MergeSnapshotOptions",
+                BindingFlags.NonPublic | BindingFlags.Static
+            );
+            Assert.NotNull(merge);
+            return (Dictionary<string, object>)merge!.Invoke(null, new object?[] { options })!;
+        }
+
+        [Fact]
+        public void PerSnapshotOptionOverridesConfigWhileConfigOnlyKeysAreKept()
+        {
+            try
+            {
+                // .percy.yml config supplies a config-only key (enableJavaScript) and a
+                // percyCSS that the per-call option must override.
+                SetCliConfigSnapshot("{\"enableJavaScript\":true,\"percyCSS\":\"FROM_CONFIG\"}");
+
+                // Per-call option only sets percyCSS — this is what reaches PercyDOM.serialize.
+                var merged = InvokeMergeSnapshotOptions(new Dictionary<string, object>
+                {
+                    { "percyCSS", "FROM_CALL" }
+                });
+
+                // Config-only key survives the merge.
+                Assert.True(merged.ContainsKey("enableJavaScript"));
+                Assert.Equal(true, merged["enableJavaScript"]);
+
+                // Per-call value wins over the config value.
+                Assert.Equal("FROM_CALL", merged["percyCSS"]);
+            }
+            finally
+            {
+                ResetCliConfig();
+            }
+        }
+    }
+
     // ─── Region Tests ──────────────────────────────────────────────────────────
 
     public class RegionTests
