@@ -239,6 +239,49 @@ namespace PercyIO.Playwright.Tests
             }
             Percy.Enabled = oldEnabledFn;
         }
+
+        // ─── Readiness gate ─────────────────────────────────────
+
+        [Fact]
+        public void PostsSnapshotWithReadinessEnabled()
+        {
+            // Readiness preset "balanced" — readiness runs before serialize.
+            // The snapshot should still post successfully regardless of whether the
+            // connected CLI has PercyDOM.waitForReady (backward-compat guard in code).
+            Percy.Snapshot(_fixture.Page, "readiness-balanced", new {
+                readiness = new { preset = "balanced" }
+            });
+
+            JsonElement data = Request("/test/logs");
+            var logs = data.GetProperty("logs").EnumerateArray()
+                .Select(log => log.GetProperty("message").GetString())
+                .Where(msg => msg != null)
+                .Select(msg => msg!)
+                .ToList();
+
+            Assert.Contains("Received snapshot: readiness-balanced", logs);
+            Assert.Contains("- domSnapshot: true", logs);
+        }
+
+        [Fact]
+        public void PostsSnapshotWithReadinessDisabled()
+        {
+            // Disabled preset — SDK must skip the waitForReady evaluate entirely.
+            // Snapshot still posts normally.
+            Percy.Snapshot(_fixture.Page, "readiness-disabled", new {
+                readiness = new { preset = "disabled" }
+            });
+
+            JsonElement data = Request("/test/logs");
+            var logs = data.GetProperty("logs").EnumerateArray()
+                .Select(log => log.GetProperty("message").GetString())
+                .Where(msg => msg != null)
+                .Select(msg => msg!)
+                .ToList();
+
+            Assert.Contains("Received snapshot: readiness-disabled", logs);
+            Assert.Contains("- domSnapshot: true", logs);
+        }
     }
 
     // ─── Cookies Capture Tests ────────────────────────────────────────────────
