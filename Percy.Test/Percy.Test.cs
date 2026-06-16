@@ -1108,6 +1108,43 @@ namespace PercyIO.Playwright.Tests
                 ResetCliConfig();
             }
         }
+
+        [Fact]
+        public void NestedObjectsDeepMergeWithPerCallWinningAtLeaves()
+        {
+            try
+            {
+                // .percy.yml config supplies a nested discovery block with two leaves.
+                SetCliConfigSnapshot("{\"discovery\":{\"networkIdleTimeout\":50,\"disableCache\":false}}");
+
+                // Per-call option only overrides one leaf inside the nested discovery object.
+                var merged = InvokeMergeSnapshotOptions(new Dictionary<string, object>
+                {
+                    {
+                        "discovery", new Dictionary<string, object>
+                        {
+                            { "disableCache", true }
+                        }
+                    }
+                });
+
+                // The nested object must be deep-merged, not replaced wholesale.
+                Assert.True(merged.ContainsKey("discovery"));
+                var discovery = Assert.IsType<Dictionary<string, object>>(merged["discovery"]);
+
+                // Config-only nested leaf survives the merge.
+                Assert.True(discovery.ContainsKey("networkIdleTimeout"));
+                Assert.Equal(50, discovery["networkIdleTimeout"]);
+
+                // Per-call nested leaf wins over the config value.
+                Assert.True(discovery.ContainsKey("disableCache"));
+                Assert.Equal(true, discovery["disableCache"]);
+            }
+            finally
+            {
+                ResetCliConfig();
+            }
+        }
     }
 
     // ─── Region Tests ──────────────────────────────────────────────────────────
