@@ -60,7 +60,10 @@ namespace PercyIO.Playwright
             }
         }
 
-        private static HttpClient? _http;
+        // volatile so the unlocked read in getHttpClient sees a fully-published
+        // HttpClient (Timeout set) before the field reference becomes visible
+        // to other threads on weak memory models (e.g. ARM).
+        private static volatile HttpClient? _http;
 
         private static string? sessionType = null;
         private static object? cliConfig;
@@ -88,14 +91,25 @@ namespace PercyIO.Playwright
             _http = client;
         }
 
+        private static readonly object _httpLock = new object();
+
         internal static HttpClient getHttpClient()
         {
+            // Double-checked locking — concurrent first-callers must not observe an
+            // _http with its default timeout (we set Timeout AFTER assigning the
+            // field, so without the lock another thread could grab the half-built
+            // client). Matches the pattern in Percy.Selenium.
             if (_http == null)
             {
-                setHttpClient(new HttpClient());
-                _http.Timeout = TimeSpan.FromMinutes(10);
+                lock (_httpLock)
+                {
+                    if (_http == null)
+                    {
+                        var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+                        _http = client;
+                    }
+                }
             }
-
             return _http;
         }
 
@@ -304,10 +318,177 @@ namespace PercyIO.Playwright
 
         public class Options : Dictionary<string, object> { }
 
+        /// <summary>
+        /// Use CDP to discover closed shadow roots and expose them to PercyDOM.serialize().
+        /// </summary>
+        private static void ExposeClosedShadowRoots(IPage page)
+        {
+            ICDPSession? cdpSession = null;
+            try
+            {
+                cdpSession = page.Context.NewCDPSessionAsync(page).ConfigureAwait(false).GetAwaiter().GetResult();
+            }
+            catch (Exception err)
+            {
+                Log($"CDP session unavailable: {err.Message}", "debug");
+                return;
+            }
+
+            try
+            {
+                cdpSession.SendAsync("DOM.enable").ConfigureAwait(false).GetAwaiter().GetResult();
+
+                var docResult = cdpSession.SendAsync("DOM.getDocument", new Dictionary<string, object>
+                {
+                    { "depth", -1 },
+                    { "pierce", true }
+                }).ConfigureAwait(false).GetAwaiter().GetResult();
+
+                var root = docResult.Value.GetProperty("root");
+
+                var closedPairs = new List<(int hostId, int shadowId)>();
+                // Pass the page URL so WalkNodes can decide whether to recurse INTO
+                // an iframe's contentDocument: same-origin iframes share the parent
+                // page's JS realm + WeakMap, so closed shadow roots inside them must
+                // be collected too. Cross-origin iframes do NOT share the realm and
+                // are skipped entirely (their closed shadow roots are handled by the
+                // per-frame ProcessFrame path).
+                string pageUrl = page.Url ?? string.Empty;
+                WalkNodes(root, closedPairs, pageUrl);
+
+                if (closedPairs.Count == 0) return;
+
+                Log($"Found {closedPairs.Count} closed shadow root(s), exposing via CDP", "debug");
+
+                page.EvaluateAsync("() => { window.__percyClosedShadowRoots = window.__percyClosedShadowRoots || new WeakMap(); }")
+                    .ConfigureAwait(false).GetAwaiter().GetResult();
+
+                foreach (var (hostId, shadowId) in closedPairs)
+                {
+                    // Per-pair try/catch: if a single host went detached between
+                    // DOM.getDocument and resolveNode (TOCTOU), an unchecked
+                    // GetProperty would throw KeyNotFoundException and abort
+                    // exposure for every remaining pair. Skip the bad one and
+                    // keep going so partial capture still wins.
+                    try
+                    {
+                        var hostResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
+                        {
+                            { "backendNodeId", hostId }
+                        }).ConfigureAwait(false).GetAwaiter().GetResult();
+                        if (!hostResult.HasValue ||
+                            !hostResult.Value.TryGetProperty("object", out JsonElement hostObj) ||
+                            !hostObj.TryGetProperty("objectId", out JsonElement hostIdEl))
+                            continue;
+                        var hostObjectId = hostIdEl.GetString();
+
+                        var shadowResult = cdpSession.SendAsync("DOM.resolveNode", new Dictionary<string, object>
+                        {
+                            { "backendNodeId", shadowId }
+                        }).ConfigureAwait(false).GetAwaiter().GetResult();
+                        if (!shadowResult.HasValue ||
+                            !shadowResult.Value.TryGetProperty("object", out JsonElement shadowObj) ||
+                            !shadowObj.TryGetProperty("objectId", out JsonElement shadowIdEl))
+                            continue;
+                        var shadowObjectId = shadowIdEl.GetString();
+
+                        if (hostObjectId == null || shadowObjectId == null) continue;
+
+                        cdpSession.SendAsync("Runtime.callFunctionOn", new Dictionary<string, object>
+                        {
+                            { "functionDeclaration", "function(shadowRoot) { window.__percyClosedShadowRoots.set(this, shadowRoot); }" },
+                            { "objectId", hostObjectId },
+                            { "arguments", new[] { new Dictionary<string, object> { { "objectId", shadowObjectId } } } }
+                        }).ConfigureAwait(false).GetAwaiter().GetResult();
+                    }
+                    catch (Exception perPairErr)
+                    {
+                        Log($"Failed to expose one closed shadow root: {perPairErr.Message}", "debug");
+                    }
+                }
+            }
+            catch (Exception err)
+            {
+                Log($"Could not expose closed shadow roots via CDP: {err.Message}", "debug");
+            }
+            finally
+            {
+                if (cdpSession != null)
+                {
+                    try { cdpSession.DetachAsync().ConfigureAwait(false).GetAwaiter().GetResult(); } catch { }
+                }
+            }
+        }
+
+        private static void WalkNodes(JsonElement node, List<(int hostId, int shadowId)> closedPairs, string pageUrl)
+        {
+            // Same-origin iframe contentDocument trees: their closed shadow roots
+            // live in the parent page's JS realm, so PercyDOM.serialize() at the
+            // parent level needs them in window.__percyClosedShadowRoots too. We
+            // recurse INTO contentDocument only when same-origin; cross-origin
+            // frames have a separate realm and a separate WeakMap, so the per-frame
+            // ProcessFrame path handles them.
+            if (node.TryGetProperty("contentDocument", out var contentDoc))
+            {
+                string frameDocUrl = null!;
+                if (contentDoc.ValueKind == JsonValueKind.Object &&
+                    contentDoc.TryGetProperty("documentURL", out var docUrlEl) &&
+                    docUrlEl.ValueKind == JsonValueKind.String)
+                {
+                    frameDocUrl = docUrlEl.GetString() ?? string.Empty;
+                }
+
+                // IsCrossOriginFrame returns false for empty / unsupported schemes
+                // (about:blank, data:, blob:, etc.) — treat those as same-origin
+                // and recurse, matching the JS SDK behaviour.
+                if (!string.IsNullOrEmpty(pageUrl) &&
+                    !IsCrossOriginFrame(frameDocUrl ?? string.Empty, pageUrl))
+                {
+                    WalkNodes(contentDoc, closedPairs, pageUrl);
+                }
+                return;
+            }
+
+            if (node.TryGetProperty("shadowRoots", out var shadowRoots))
+            {
+                foreach (var sr in shadowRoots.EnumerateArray())
+                {
+                    if (sr.TryGetProperty("shadowRootType", out var type) && type.GetString() == "closed")
+                    {
+                        closedPairs.Add((
+                            node.GetProperty("backendNodeId").GetInt32(),
+                            sr.GetProperty("backendNodeId").GetInt32()
+                        ));
+                    }
+                    WalkNodes(sr, closedPairs, pageUrl);
+                }
+            }
+
+            if (node.TryGetProperty("children", out var children))
+            {
+                foreach (var child in children.EnumerateArray())
+                {
+                    WalkNodes(child, closedPairs, pageUrl);
+                }
+            }
+        }
+
+        // Schemes whose iframe content can't be (or shouldn't be) captured —
+        // matches Percy.Selenium's IsUnsupportedIframeSrc. Lower-case prefix match.
+        private static readonly string[] _unsupportedIframeSchemes = new[]
+        {
+            "about:", "chrome:", "chrome-extension:", "devtools:", "edge:",
+            "opera:", "view-source:", "data:", "javascript:", "vbscript:", "blob:"
+        };
+
         private static bool IsCrossOriginFrame(string frameUrl, string pageUrl)
         {
-            if (frameUrl == "about:blank")
-                return false;
+            if (string.IsNullOrEmpty(frameUrl)) return false;
+            var lower = frameUrl.ToLowerInvariant();
+            foreach (var prefix in _unsupportedIframeSchemes)
+            {
+                if (lower.StartsWith(prefix)) return false;
+            }
 
             try
             {
@@ -329,7 +510,7 @@ namespace PercyIO.Playwright
             {
                 // Inject Percy DOM into the cross-origin frame
                 // .GetAwaiter().GetResult() is used to block synchronously; EvaluateSync is not available for IFrame, only IPage
-                frame.EvaluateAsync(percyDomScript).GetAwaiter().GetResult();
+                frame.EvaluateAsync(percyDomScript).ConfigureAwait(false).GetAwaiter().GetResult();
 
                 // enableJavaScript=True prevents the standard iframe serialization logic from running.
                 // This is necessary because we're manually handling cross-origin iframe serialization here.
@@ -339,7 +520,7 @@ namespace PercyIO.Playwright
                 // Serialize the frame
                 string serializeScript = $"PercyDOM.serialize({JsonSerializer.Serialize(optionsForFrame)})";
                 // .GetAwaiter().GetResult() is used to block synchronously; EvaluateSync is not available for IFrame, only IPage
-                var iframeSnapshot = frame.EvaluateAsync(serializeScript).GetAwaiter().GetResult();
+                var iframeSnapshot = frame.EvaluateAsync(serializeScript).ConfigureAwait(false).GetAwaiter().GetResult();
 
                 // Get the iframe's element data from the main page context
                 string getDataScript = "(fUrl) => {\n" +
@@ -683,7 +864,7 @@ namespace PercyIO.Playwright
                     {
                         // ReloadAsync has no sync equivalent; block with .GetAwaiter().GetResult() to ensure page is fully loaded before capturing DOM
                         var reloadTask = page.ReloadAsync();
-                        reloadTask.GetAwaiter().GetResult();
+                        reloadTask.ConfigureAwait(false).GetAwaiter().GetResult();
 
                         if (!PercyPlaywrightDriver.EvaluateSync<bool>(page, "!!window.PercyDOM"))
                         {
@@ -784,10 +965,13 @@ namespace PercyIO.Playwright
                 if (PercyPlaywrightDriver.EvaluateSync<bool>(page, "!!window.PercyDOM") == false)
                     PercyPlaywrightDriver.EvaluateSync<string>(page, GetPercyDOM());
 
+                // Expose closed shadow roots via CDP before serialization
+                ExposeClosedShadowRoots(page);
+
                 // Convert IEnumerable to Dictionary for proper JSON serialization
                 var optionsDict = options?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
                 // CookiesAsync has no sync equivalent; block with .GetAwaiter().GetResult() to fetch cookies before serializing the DOM
-                var cookies = page.Context.CookiesAsync().GetAwaiter().GetResult();
+                var cookies = page.Context.CookiesAsync().ConfigureAwait(false).GetAwaiter().GetResult();
                 string cookiesJson = JsonSerializer.Serialize(cookies);
                 object domSnapshot = IsResponsiveSnapshotCapture(optionsDict)
                     ? CaptureResponsiveDom(page, optionsDict, cookiesJson)
