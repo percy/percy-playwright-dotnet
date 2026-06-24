@@ -64,6 +64,97 @@ namespace PercyIO.Playwright.Tests
 
             Assert.Equal(1, driver.FetchCount);
         }
+
+        // ─── GUID reflection (GetPageGUID/GetFrameGUID/GetBrowserGuid) offline ─────
+        //
+        // In production these reflect Playwright's internal <Guid>k__BackingField off
+        // the page / main-frame / browser impl types (live-only). The production code
+        // reads that field off the object returned by the protected-virtual
+        // Get*GuidSource seams, which default to this.page[.MainFrame] / Context.Browser.
+        // Here we override only those seams to hand back a stand-in object whose
+        // BaseType exposes the SAME backing field, so the real GetField / GetValue /
+        // cast / return lines execute without a live Chromium page.
+
+        // Base type carrying an auto-property whose compiler-generated backing field is
+        // exactly "<Guid>k__BackingField" — the same name the production reflection reads.
+        private class GuidBackingBase
+        {
+            public string Guid { get; set; } = "";
+        }
+
+        // Derived type: its BaseType is GuidBackingBase, mirroring how Playwright impl
+        // classes derive from a base that holds the Guid backing field.
+        private sealed class GuidBackingImpl : GuidBackingBase { }
+
+        private sealed class GuidSeamDriver : PercyPlaywrightDriver
+        {
+            private readonly GuidBackingImpl _page;
+            private readonly GuidBackingImpl _frame;
+            private readonly GuidBackingImpl _browser;
+
+            public GuidSeamDriver(string pageGuid, string frameGuid, string browserGuid) : base(null!)
+            {
+                _page = new GuidBackingImpl { Guid = pageGuid };
+                _frame = new GuidBackingImpl { Guid = frameGuid };
+                _browser = new GuidBackingImpl { Guid = browserGuid };
+            }
+
+            protected override object GetPageGuidSource() => _page;
+            protected override object GetFrameGuidSource() => _frame;
+            protected override object GetBrowserGuidSource() => _browser;
+
+            // Expose the protected GetBrowserGuid for direct assertion.
+            public string CallGetBrowserGuid() => GetBrowserGuid();
+        }
+
+        [Fact]
+        public void GetPageGUID_ReadsBackingFieldFromSource()
+        {
+            var driver = new GuidSeamDriver("page-guid-x", "frame-guid-y", "browser-guid-z");
+            Assert.Equal("page-guid-x", driver.GetPageGUID());
+        }
+
+        [Fact]
+        public void GetFrameGUID_ReadsBackingFieldFromSource()
+        {
+            var driver = new GuidSeamDriver("page-guid-x", "frame-guid-y", "browser-guid-z");
+            Assert.Equal("frame-guid-y", driver.GetFrameGUID());
+        }
+
+        [Fact]
+        public void GetBrowserGuid_ReadsBackingFieldFromSource()
+        {
+            var driver = new GuidSeamDriver("page-guid-x", "frame-guid-y", "browser-guid-z");
+            Assert.Equal("browser-guid-z", driver.CallGetBrowserGuid());
+        }
+
+        // Exposes the DEFAULT (non-overridden) Get*GuidSource seam bodies so their
+        // production one-liners — which simply return this.page / this.page.MainFrame /
+        // this.page.Context.Browser — are exercised offline against a mocked page.
+        private sealed class BaseSourceDriver : PercyPlaywrightDriver
+        {
+            public BaseSourceDriver(Microsoft.Playwright.IPage page) : base(page) { }
+            public object CallPageSource() => GetPageGuidSource();
+            public object CallFrameSource() => GetFrameGuidSource();
+            public object CallBrowserSource() => GetBrowserGuidSource();
+        }
+
+        [Fact]
+        public void GuidSourceSeams_DefaultBodies_ReturnPageFrameAndBrowser()
+        {
+            var frame = new Moq.Mock<Microsoft.Playwright.IFrame>().Object;
+            var browser = new Moq.Mock<Microsoft.Playwright.IBrowser>().Object;
+            var ctx = new Moq.Mock<Microsoft.Playwright.IBrowserContext>();
+            ctx.SetupGet(c => c.Browser).Returns(browser);
+            var page = new Moq.Mock<Microsoft.Playwright.IPage>();
+            page.SetupGet(p => p.MainFrame).Returns(frame);
+            page.SetupGet(p => p.Context).Returns(ctx.Object);
+
+            var driver = new BaseSourceDriver(page.Object);
+            Assert.Same(page.Object, driver.CallPageSource());
+            Assert.Same(frame, driver.CallFrameSource());
+            Assert.Same(browser, driver.CallBrowserSource());
+        }
     }
 
     // ─── GUID reflection methods against a real Chromium page ─────────────────────

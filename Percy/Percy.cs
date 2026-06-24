@@ -91,6 +91,14 @@ namespace PercyIO.Playwright
         internal static bool ResponsiveCaptureMinHeight = PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT;
         internal static bool ResponsiveCaptureReloadPage = PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE;
 
+        // Behavior-preserving seam for the readiness-JSON string that WaitForReady feeds
+        // into JsonDocument.Parse. Defaults to null, so production uses the readinessJson
+        // computed from options/cliConfig verbatim — runtime behavior is identical. A test
+        // can install a transform to inject a malformed string and exercise the
+        // malformed-JSON defensive catch, which is otherwise unreachable because
+        // JsonSerializer.Serialize / JsonElement.GetRawText only ever yield valid JSON.
+        internal static Func<string, string>? ReadinessJsonTransform = null;
+
         private static string PayloadParser(object? payload = null, bool alreadyJson = false)
         {
             if (alreadyJson)
@@ -589,6 +597,10 @@ namespace PercyIO.Playwright
             {
                 readinessJson = readinessElement.GetRawText();
             }
+
+            // No-op in production (ReadinessJsonTransform is null); a test seam can
+            // substitute a malformed string to exercise the defensive parse-catch below.
+            if (ReadinessJsonTransform != null) readinessJson = ReadinessJsonTransform(readinessJson);
 
             // Skip when preset is disabled
             try

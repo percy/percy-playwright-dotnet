@@ -57,6 +57,7 @@ namespace PercyIO.Playwright.Tests
             SetFlagBool("ResponsiveCaptureMinHeight", _origMinHeight);
             SetFlagBool("ResponsiveCaptureReloadPage", _origReload);
             SetFlagStr("ResponsiveCaptureSleepTime", _origSleep);
+            Percy.ReadinessJsonTransform = null;
             ClearCliConfig();
             Percy.ResetInternalCaches();
         }
@@ -939,6 +940,401 @@ namespace PercyIO.Playwright.Tests
             private readonly string _guid;
             public SeamDriver(IPage page, string guid) : base(page) { _guid = guid; }
             protected override string GetBrowserGuid() => _guid;
+        }
+
+        // ─── Log success path: /percy/log returns 200 (line 48 Request returns) ──────
+
+        [Fact]
+        public void Log_WhenCliRequestSucceeds_PostsToPercyLogAndWritesPlainToStderr()
+        {
+            // /percy/log POST succeeds (200) → Request returns normally (line 48), the
+            // catch is skipped, and the finally still writes the plain message to stderr.
+            var http = new MockHttpMessageHandler();
+            bool posted = false;
+            http.When(HttpMethod.Post, "http://localhost:5338/percy/log")
+                .Respond(_ =>
+                {
+                    posted = true;
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"success\":true}", System.Text.Encoding.UTF8, "application/json")
+                    };
+                });
+            Percy.setHttpClient(new HttpClient(http));
+
+            var origErr = Console.Error;
+            var sw = new System.IO.StringWriter();
+            Console.SetError(sw);
+            try
+            {
+                var log = PercyType.GetMethod("Log", BindingFlags.NonPublic | BindingFlags.Static)!
+                    .MakeGenericMethod(typeof(string));
+                log.Invoke(null, new object?[] { "hello-success", "info" });
+            }
+            finally { Console.SetError(origErr); }
+
+            Assert.True(posted);
+            Assert.Contains("hello-success", sw.ToString());
+        }
+
+        // ─── Enabled() version branches (191-201) ───────────────────────────────────
+
+        [Fact]
+        public void Enabled_SuccessTrue_NoVersionHeader_LogsAgentMessageAndDisables()
+        {
+            // success=true but NO x-percy-core-version header (res.version == null) →
+            // the "@percy/agent is no longer supported" message branch (191-196).
+            var mock = HttpWithHealthcheck("{\"success\":true}", version: null);
+            Percy.setHttpClient(new HttpClient(mock));
+            Percy.ResetInternalCaches();
+
+            Assert.False(Percy.Enabled());
+        }
+
+        [Fact]
+        public void Enabled_SuccessTrue_UnsupportedMajorVersion_LogsAndDisables()
+        {
+            // success=true, version "2.0.0" → res.version[0] != '1' → unsupported branch
+            // (198-201) logs and disables.
+            var mock = HttpWithHealthcheck("{\"success\":true}", version: "2.0.0");
+            Percy.setHttpClient(new HttpClient(mock));
+            Percy.ResetInternalCaches();
+
+            Assert.False(Percy.Enabled());
+        }
+
+        // ─── WaitForReady malformed-readiness-JSON catch (605) ──────────────────────
+
+        [Fact]
+        public void WaitForReady_MalformedReadinessJson_ParseThrows_FallsThroughToEvaluate()
+        {
+            // The readiness JSON computed from options/cliConfig is always valid
+            // (JsonSerializer.Serialize / JsonElement.GetRawText cannot emit invalid JSON),
+            // so the defensive malformed-JSON catch (line 605) is only reachable via the
+            // ReadinessJsonTransform seam — which defaults to null in production. We install
+            // a transform returning a malformed string so JsonDocument.Parse throws, the
+            // catch swallows it, and execution falls through to evaluate the script.
+            ClearCliConfig();
+            var page = NewPage();
+            SetupEvalObject(page, _ => new Dictionary<string, object> { { "diag", 9 } });
+
+            Percy.ReadinessJsonTransform = _ => "{ this is : not valid json";
+            try
+            {
+                var result = InvokeWaitForReady(page.Object, null);
+                Assert.NotNull(result);
+            }
+            finally { Percy.ReadinessJsonTransform = null; }
+        }
+
+        // ─── GetSerializedDom: corsIframes attach to dict snapshot (670-672) ─────────
+
+        [Fact]
+        public void GetSerializedDom_DictSnapshotWithCorsFrame_AttachesCorsIframes()
+        {
+            // DOM serialize returns a dictionary AND a cross-origin frame is successfully
+            // processed → processedFrames > 0 and the snapshot IS a dict, so corsIframes
+            // is attached (lines 669-672).
+            ClearCliConfig();
+            var page = NewPage();
+            int call = 0;
+            page.Setup(p => p.EvaluateAsync<object>(It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns((string s, object? a) =>
+                {
+                    call++;
+                    if (call == 1) return Task.FromResult<object>(null!);                 // WaitForReady → null
+                    if (s.Contains("PercyDOM.serialize"))
+                        return Task.FromResult<object>(new Dictionary<string, object> { { "html", "<p/>" } });
+                    // getData lookup for the cross-origin frame returns a matching element.
+                    return Task.FromResult<object>(new Dictionary<string, object> { { "percyElementId", "id" } });
+                });
+            page.SetupGet(p => p.Url).Returns("http://localhost:5338/");
+
+            var frame = new Mock<IFrame>();
+            frame.SetupGet(f => f.Url).Returns("http://127.0.0.1:5338/frame");
+            frame.Setup(f => f.EvaluateAsync(It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.FromResult<JsonElement?>(Json("\"frame-snap\"")));
+            page.SetupGet(p => p.Frames).Returns(new List<IFrame> { frame.Object });
+
+            var http = new MockHttpMessageHandler();
+            http.When(HttpMethod.Get, "http://localhost:5338/percy/dom.js")
+                .Respond("application/javascript", "window.PercyDOM={};");
+            Percy.setHttpClient(new HttpClient(http));
+            ResetDom();
+
+            var dom = InvokeGetSerializedDom(page.Object, null, "[]");
+            var dict = Assert.IsAssignableFrom<IDictionary<string, object>>(dom);
+            Assert.True(dict.ContainsKey("corsIframes"));
+        }
+
+        // ─── Snapshot automate-session throw (975) ──────────────────────────────────
+
+        [Fact]
+        public void Snapshot_WhenSessionTypeIsAutomate_ThrowsInvalidFunctionCall()
+        {
+            // sessionType == "automate" → Snapshot() throws the "use Screenshot()" guard
+            // (line 975) BEFORE the try, so it propagates (not swallowed by the catch).
+            Percy.Enabled = () => true;
+            Percy.setSessionType("automate");
+
+            var page = NewPage();
+            var ex = Assert.Throws<Exception>(() => Percy.Snapshot(page.Object, "Automate Snapshot"));
+            Assert.Contains("Invalid function call - Snapshot()", ex.Message);
+        }
+
+        // ─── Snapshot DOM re-inject branch (980) + success-true-no-data null (1015)
+        //     + options-merge loop (1003-1004) ─────────────────────────────────────
+
+        [Fact]
+        public void Snapshot_WhenPercyDomMissing_ReinjectsDom_MergesOptions_AndReturnsNullWhenNoData()
+        {
+            // window.PercyDOM is false → the re-inject DOM line (980) runs. Options are
+            // supplied so the options-merge loop (1003-1004) runs. Response is
+            // success=true with NO "data" property → the success-but-no-data null
+            // return (1015) is taken.
+            Percy.Enabled = () => true;
+            Percy.setSessionType("web");
+            ClearCliConfig();
+            Percy.setHttpClient(new HttpClient(SnapshotHttp("{\"success\":true}")));
+            ResetDom();
+
+            var page = SnapshotPage();
+            // Override the bool eval so the first !!window.PercyDOM check returns false,
+            // driving the GetPercyDOM re-injection (line 980).
+            page.Setup(p => p.EvaluateAsync<bool>(It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.FromResult(false));
+            // The re-inject calls EvaluateSync<string>(page, GetPercyDOM()); set up the
+            // <string> overload so it does not fall through to the <object> setup (Moq's
+            // open-generic dispatch would otherwise return a Task<object> and throw).
+            page.Setup(p => p.EvaluateAsync<string>(It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.FromResult("injected"));
+
+            var options = new List<KeyValuePair<string, object>>
+            {
+                new KeyValuePair<string, object>("enableJavaScript", true),
+                new KeyValuePair<string, object>("foo", "bar")
+            };
+
+            Assert.Null(Percy.Snapshot(page.Object, "ReInject Snapshot", options));
+        }
+
+        // ─── ExposeClosedShadowRoots via CDP (345-433) ──────────────────────────────
+        // ICDPSession + IBrowserContext.NewCDPSessionAsync(IPage) are mockable with Moq.
+        // We drive: the CDP-unavailable early return (345-349), the getDocument + WalkNodes
+        // discovery of closed pairs, the WeakMap init + per-pair resolveNode/callFunctionOn
+        // loop (355-422), the per-pair TOCTOU continue/catch (388-422), the no-pairs early
+        // return (373), the outer catch (424-427), and the finally DetachAsync (431-433).
+
+        private static void InvokeExposeClosedShadowRoots(IPage page) =>
+            PrivateStatic("ExposeClosedShadowRoots").Invoke(null, new object?[] { page });
+
+        // Wires a page whose Context.NewCDPSessionAsync(page) returns the given session.
+        private static Mock<IPage> CdpPage(ICDPSession session, string url = "http://localhost:5338/")
+        {
+            var page = NewPage();
+            page.SetupGet(p => p.Url).Returns(url);
+            var ctx = new Mock<IBrowserContext>();
+            ctx.Setup(c => c.NewCDPSessionAsync(It.IsAny<IPage>()))
+                .Returns(Task.FromResult(session));
+            page.SetupGet(p => p.Context).Returns(ctx.Object);
+            // window.PercyDOM WeakMap init is a non-generic EvaluateAsync; make it a no-op.
+            page.Setup(p => p.EvaluateAsync(It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.FromResult<JsonElement?>(Json("null")));
+            return page;
+        }
+
+        // A getDocument payload string with one CLOSED shadow-root pair: host backendNodeId=10,
+        // shadow backendNodeId=11. Wrapped as { "root": { ... } }.
+        private const string ClosedPairDoc =
+            "{\"root\":{\"backendNodeId\":1,\"children\":[" +
+            "{\"backendNodeId\":10,\"shadowRoots\":[{\"backendNodeId\":11,\"shadowRootType\":\"closed\"}]}" +
+            "]}}";
+
+        // getDocument payload with NO closed shadow roots (only an open one).
+        private const string OpenOnlyDoc =
+            "{\"root\":{\"backendNodeId\":1,\"children\":[" +
+            "{\"backendNodeId\":20,\"shadowRoots\":[{\"backendNodeId\":21,\"shadowRootType\":\"open\"}]}" +
+            "]}}";
+
+        [Fact]
+        public void ExposeClosedShadowRoots_WhenCdpSessionUnavailable_LogsAndReturns()
+        {
+            // NewCDPSessionAsync throws → first catch (345-348) logs at debug and returns;
+            // the body (DOM.enable etc.) is never reached.
+            var page = NewPage();
+            page.SetupGet(p => p.Url).Returns("http://localhost:5338/");
+            var ctx = new Mock<IBrowserContext>();
+            ctx.Setup(c => c.NewCDPSessionAsync(It.IsAny<IPage>()))
+                .ThrowsAsync(new Exception("no cdp"));
+            page.SetupGet(p => p.Context).Returns(ctx.Object);
+
+            InvokeExposeClosedShadowRoots(page.Object); // must not throw
+        }
+
+        [Fact]
+        public void ExposeClosedShadowRoots_NoClosedPairs_ReturnsEarlyAfterWalk()
+        {
+            // getDocument returns a tree with only OPEN shadow roots → closedPairs.Count==0
+            // → early return (373). resolveNode/callFunctionOn must NOT be called, but the
+            // finally still detaches the session (431-433).
+            var session = new Mock<ICDPSession>();
+            session.Setup(s => s.SendAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object>?>()))
+                .Returns((string method, Dictionary<string, object>? _) =>
+                {
+                    if (method == "DOM.getDocument") return Task.FromResult<JsonElement?>(Json(OpenOnlyDoc));
+                    return Task.FromResult<JsonElement?>(Json("{}"));
+                });
+            session.Setup(s => s.DetachAsync()).Returns(Task.CompletedTask);
+
+            var page = CdpPage(session.Object);
+            InvokeExposeClosedShadowRoots(page.Object);
+
+            session.Verify(s => s.SendAsync("DOM.resolveNode", It.IsAny<Dictionary<string, object>?>()), Times.Never);
+            session.Verify(s => s.DetachAsync(), Times.Once);
+        }
+
+        [Fact]
+        public void ExposeClosedShadowRoots_HappyPath_ResolvesPairAndCallsFunctionOnAndDetaches()
+        {
+            // Closed pair found → WeakMap init, resolveNode for host + shadow (each returning
+            // an objectId), then Runtime.callFunctionOn, then DetachAsync (355-422, 431-433).
+            var session = new Mock<ICDPSession>();
+            bool calledFunctionOn = false;
+            session.Setup(s => s.SendAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object>?>()))
+                .Returns((string method, Dictionary<string, object>? args) =>
+                {
+                    switch (method)
+                    {
+                        case "DOM.getDocument":
+                            return Task.FromResult<JsonElement?>(Json(ClosedPairDoc));
+                        case "DOM.resolveNode":
+                            // Both host (10) and shadow (11) resolve to an objectId.
+                            int id = Convert.ToInt32(args!["backendNodeId"]);
+                            return Task.FromResult<JsonElement?>(
+                                Json($"{{\"object\":{{\"objectId\":\"obj-{id}\"}}}}"));
+                        case "Runtime.callFunctionOn":
+                            calledFunctionOn = true;
+                            return Task.FromResult<JsonElement?>(Json("{}"));
+                        default:
+                            return Task.FromResult<JsonElement?>(Json("{}")); // DOM.enable
+                    }
+                });
+            session.Setup(s => s.DetachAsync()).Returns(Task.CompletedTask);
+
+            var page = CdpPage(session.Object);
+            InvokeExposeClosedShadowRoots(page.Object);
+
+            Assert.True(calledFunctionOn);
+            session.Verify(s => s.SendAsync("Runtime.callFunctionOn", It.IsAny<Dictionary<string, object>?>()), Times.Once);
+            session.Verify(s => s.DetachAsync(), Times.Once);
+        }
+
+        [Fact]
+        public void ExposeClosedShadowRoots_ResolveNodeMissingObjectId_SkipsPair()
+        {
+            // resolveNode returns a payload WITHOUT object/objectId → the host-resolve
+            // guard (393-396) continues, so callFunctionOn is never reached for that pair.
+            var session = new Mock<ICDPSession>();
+            session.Setup(s => s.SendAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object>?>()))
+                .Returns((string method, Dictionary<string, object>? args) =>
+                {
+                    if (method == "DOM.getDocument") return Task.FromResult<JsonElement?>(Json(ClosedPairDoc));
+                    if (method == "DOM.resolveNode") return Task.FromResult<JsonElement?>(Json("{}")); // no "object"
+                    return Task.FromResult<JsonElement?>(Json("{}"));
+                });
+            session.Setup(s => s.DetachAsync()).Returns(Task.CompletedTask);
+
+            var page = CdpPage(session.Object);
+            InvokeExposeClosedShadowRoots(page.Object);
+
+            session.Verify(s => s.SendAsync("Runtime.callFunctionOn", It.IsAny<Dictionary<string, object>?>()), Times.Never);
+            session.Verify(s => s.DetachAsync(), Times.Once);
+        }
+
+        [Fact]
+        public void ExposeClosedShadowRoots_ShadowResolveMissingObjectId_SkipsPair()
+        {
+            // Host resolveNode (backendNodeId 10) returns a valid objectId, but the SHADOW
+            // resolveNode (backendNodeId 11) returns no object/objectId → the shadow guard
+            // (411-414) continues, so callFunctionOn is never reached for that pair.
+            var session = new Mock<ICDPSession>();
+            session.Setup(s => s.SendAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object>?>()))
+                .Returns((string method, Dictionary<string, object>? args) =>
+                {
+                    if (method == "DOM.getDocument") return Task.FromResult<JsonElement?>(Json(ClosedPairDoc));
+                    if (method == "DOM.resolveNode")
+                    {
+                        int id = Convert.ToInt32(args!["backendNodeId"]);
+                        // Host (10) resolves; shadow (11) returns an empty object (no objectId).
+                        return id == 10
+                            ? Task.FromResult<JsonElement?>(Json("{\"object\":{\"objectId\":\"obj-10\"}}"))
+                            : Task.FromResult<JsonElement?>(Json("{}"));
+                    }
+                    return Task.FromResult<JsonElement?>(Json("{}"));
+                });
+            session.Setup(s => s.DetachAsync()).Returns(Task.CompletedTask);
+
+            var page = CdpPage(session.Object);
+            InvokeExposeClosedShadowRoots(page.Object);
+
+            session.Verify(s => s.SendAsync("Runtime.callFunctionOn", It.IsAny<Dictionary<string, object>?>()), Times.Never);
+            session.Verify(s => s.DetachAsync(), Times.Once);
+        }
+
+        [Fact]
+        public void ExposeClosedShadowRoots_PerPairResolveThrows_CaughtAndContinues()
+        {
+            // resolveNode throws for the pair → the per-pair try/catch (388-421) logs and
+            // moves on; the loop completes and the session is detached.
+            var session = new Mock<ICDPSession>();
+            session.Setup(s => s.SendAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object>?>()))
+                .Returns((string method, Dictionary<string, object>? args) =>
+                {
+                    if (method == "DOM.getDocument") return Task.FromResult<JsonElement?>(Json(ClosedPairDoc));
+                    if (method == "DOM.resolveNode") throw new Exception("node detached");
+                    return Task.FromResult<JsonElement?>(Json("{}"));
+                });
+            session.Setup(s => s.DetachAsync()).Returns(Task.CompletedTask);
+
+            var page = CdpPage(session.Object);
+            InvokeExposeClosedShadowRoots(page.Object); // must not throw
+            session.Verify(s => s.DetachAsync(), Times.Once);
+        }
+
+        [Fact]
+        public void ExposeClosedShadowRoots_DomEnableThrows_OuterCatchSwallows_StillDetaches()
+        {
+            // DOM.enable throws → the outer catch (424-427) logs at debug; the finally
+            // still detaches the non-null session (431-433).
+            var session = new Mock<ICDPSession>();
+            session.Setup(s => s.SendAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object>?>()))
+                .Returns((string method, Dictionary<string, object>? args) =>
+                {
+                    if (method == "DOM.enable") throw new Exception("enable boom");
+                    return Task.FromResult<JsonElement?>(Json("{}"));
+                });
+            session.Setup(s => s.DetachAsync()).Returns(Task.CompletedTask);
+
+            var page = CdpPage(session.Object);
+            InvokeExposeClosedShadowRoots(page.Object); // must not throw
+            session.Verify(s => s.DetachAsync(), Times.Once);
+        }
+
+        [Fact]
+        public void ExposeClosedShadowRoots_DetachThrows_FinallyCatchSwallows()
+        {
+            // DetachAsync itself throws → the finally's inner try/catch (432) swallows it.
+            var session = new Mock<ICDPSession>();
+            session.Setup(s => s.SendAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, object>?>()))
+                .Returns((string method, Dictionary<string, object>? args) =>
+                {
+                    if (method == "DOM.getDocument") return Task.FromResult<JsonElement?>(Json(OpenOnlyDoc));
+                    return Task.FromResult<JsonElement?>(Json("{}"));
+                });
+            session.Setup(s => s.DetachAsync()).ThrowsAsync(new Exception("detach boom"));
+
+            var page = CdpPage(session.Object);
+            InvokeExposeClosedShadowRoots(page.Object); // must not throw
         }
     }
 
