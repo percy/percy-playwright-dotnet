@@ -3,12 +3,15 @@ using Microsoft.Playwright;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("Percy.Test")]
 
 namespace PercyIO.Playwright
 {
     internal class PercyPlaywrightDriver : IPercyPlaywrightDriver
     {
-        private IPage page;
+        protected IPage page;
         private static Cache<string, object> cache = new Cache<string, object>();
 
         internal PercyPlaywrightDriver(IPage page)
@@ -21,18 +24,30 @@ namespace PercyIO.Playwright
         }
 
         public string GetPageGUID() {
-            Type pageImplType = this.page.GetType().BaseType;
+            object pageImpl = GetPageGuidSource();
+            Type pageImplType = pageImpl.GetType().BaseType;
             FieldInfo guidField = pageImplType.GetField("<Guid>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
-            string pageGUID = (string)guidField.GetValue(this.page);
+            string pageGUID = (string)guidField.GetValue(pageImpl);
             return pageGUID;
         }
 
         public string GetFrameGUID() {
-            Type frameImplType = this.page.MainFrame.GetType().BaseType;
+            object frameImpl = GetFrameGuidSource();
+            Type frameImplType = frameImpl.GetType().BaseType;
             FieldInfo frameGuidField = frameImplType.GetField("<Guid>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
-            string frameGuid = (string)frameGuidField.GetValue(this.page.MainFrame);
+            string frameGuid = (string)frameGuidField.GetValue(frameImpl);
             return frameGuid;
         }
+
+        // Behavior-preserving seams: the GUID reflection above reads the internal
+        // <Guid>k__BackingField off the object returned here. In production these
+        // return exactly this.page / this.page.MainFrame (the Playwright impl types),
+        // so the reflected type, field lookup, value read and return are identical to
+        // before. Marked protected virtual so a test subclass can supply a stand-in
+        // object that exposes the same backing field, exercising the reflection/parse
+        // lines without a live Chromium page.
+        protected virtual object GetPageGuidSource() => this.page;
+        protected virtual object GetFrameGuidSource() => this.page.MainFrame;
         public string GetSessionId()
         {
             // It is browser's guid maintained by playwright, considering it is unique for one automate session
@@ -40,7 +55,7 @@ namespace PercyIO.Playwright
             string browserGuid = GetBrowserGuid();
             if (cache.Get(browserGuid) == null)
             {
-                string sessionDetailsJson = PercyPlaywrightDriver.EvaluateSync<string>(this.page, "_ => {}", "browserstack_executor: {\"action\":\"getSessionDetails\"}");
+                string sessionDetailsJson = FetchSessionDetails();
                 var sessionDetails = JsonSerializer.Deserialize<JsonElement>(sessionDetailsJson);
                 sessionDetails.TryGetProperty("hashed_id", out JsonElement hashedIdElement);
                 cache.Store(browserGuid, hashedIdElement.GetString());
@@ -48,13 +63,34 @@ namespace PercyIO.Playwright
             return (string)cache.Get(browserGuid);
         }
 
-        private string GetBrowserGuid()
+        // Executes the BrowserStack Automate "getSessionDetails" executor over the
+        // live CDP/WebSocket bridge. Extracted into a protected virtual method so the
+        // session-id caching/parsing logic in GetSessionId can be exercised without a
+        // real Automate session. Production behavior is unchanged: GetSessionId still
+        // calls EvaluateSync against the page exactly as before.
+        protected virtual string FetchSessionDetails()
         {
-            Type browserImplType = this.page.Context.Browser.GetType().BaseType;
+            return PercyPlaywrightDriver.EvaluateSync<string>(this.page, "_ => {}", "browserstack_executor: {\"action\":\"getSessionDetails\"}");
+        }
+
+        // Reflects into Playwright's internal browser implementation to read its Guid.
+        // Marked protected virtual so tests can supply a deterministic guid without a
+        // live browser; production callers reach the same reflection path as before.
+        protected virtual string GetBrowserGuid()
+        {
+            object browserImpl = GetBrowserGuidSource();
+            Type browserImplType = browserImpl.GetType().BaseType;
             FieldInfo guidField = browserImplType.GetField("<Guid>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
-            string browserGuid = (string)guidField.GetValue(this.page.Context.Browser);
+            string browserGuid = (string)guidField.GetValue(browserImpl);
             return browserGuid;
         }
+
+        // Behavior-preserving seam: in production this returns exactly
+        // this.page.Context.Browser, so GetBrowserGuid reflects over the same
+        // Playwright impl type as before. A test subclass can override it to return a
+        // stand-in object exposing the same <Guid>k__BackingField, covering the
+        // browser-reflection lines without a live browser.
+        protected virtual object GetBrowserGuidSource() => this.page.Context.Browser;
 
         public static T EvaluateSync<T>(IPage page, string script, string arguments = null) {
             Task<T> scriptTask = page.EvaluateAsync<T>(script, arguments);
