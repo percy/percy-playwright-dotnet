@@ -1383,6 +1383,30 @@ namespace PercyIO.Playwright.Tests
         }
 
         [Fact]
+        public void MixedArrayStaysListOfObjectAndNullValueIsDropped()
+        {
+            try
+            {
+                // A non-all-integer array is deep-converted to List<object> (not List<int>),
+                // and a null config value converts to null and is dropped from the merge.
+                SetCliConfigSnapshot("{\"ignoreRegions\":[\"a\",1],\"emptyKey\":null}");
+
+                var merged = InvokeMergeSnapshotOptions(new Dictionary<string, object>
+                {
+                    { "percyCSS", "x" }
+                });
+
+                Assert.IsType<List<object>>(merged["ignoreRegions"]);
+                Assert.False(merged.ContainsKey("emptyKey"));
+                Assert.Equal("x", merged["percyCSS"]);
+            }
+            finally
+            {
+                ResetCliConfig();
+            }
+        }
+
+        [Fact]
         public void NestedObjectsDeepMergeWithPerCallWinningAtLeaves()
         {
             try
