@@ -108,7 +108,7 @@ namespace PercyIO.Playwright.Tests
         private static MockHttpMessageHandler HttpWithHealthcheck(string healthcheckJson, string? version = "1.0.0")
         {
             var mock = new MockHttpMessageHandler();
-            var req = mock.When(HttpMethod.Get, "http://localhost:5338/percy/healthcheck");
+            var req = mock.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/healthcheck");
             if (version != null)
             {
                 req.Respond(_ =>
@@ -330,7 +330,7 @@ namespace PercyIO.Playwright.Tests
 
             // GetPercyDOM is fetched over http → provide a mock that returns a script body.
             var http = new MockHttpMessageHandler();
-            http.When(HttpMethod.Get, "http://localhost:5338/percy/dom.js")
+            http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/dom.js")
                 .Respond("application/javascript", "window.PercyDOM={};");
             Percy.setHttpClient(new HttpClient(http));
             ResetDom();
@@ -359,7 +359,7 @@ namespace PercyIO.Playwright.Tests
 
             // GetPercyDOM still fetched first inside the try; provide mock http.
             var http = new MockHttpMessageHandler();
-            http.When(HttpMethod.Get, "http://localhost:5338/percy/dom.js")
+            http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/dom.js")
                 .Respond("application/javascript", "window.PercyDOM={};");
             Percy.setHttpClient(new HttpClient(http));
             ResetDom();
@@ -377,7 +377,7 @@ namespace PercyIO.Playwright.Tests
         private void SetWidthsHttp(string widthsConfigJson)
         {
             var http = new MockHttpMessageHandler();
-            http.When(HttpMethod.Get, "http://localhost:5338/percy/widths-config*")
+            http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/widths-config*")
                 .Respond("application/json", widthsConfigJson);
             Percy.setHttpClient(new HttpClient(http));
         }
@@ -426,7 +426,7 @@ namespace PercyIO.Playwright.Tests
             // widths-config endpoint errors (500) → EnsureSuccessStatusCode throws,
             // caught and rethrown as the upgrade message (532-536).
             var http = new MockHttpMessageHandler();
-            http.When(HttpMethod.Get, "http://localhost:5338/percy/widths-config*")
+            http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/widths-config*")
                 .Respond(HttpStatusCode.InternalServerError, "application/json", "{}");
             Percy.setHttpClient(new HttpClient(http));
 
@@ -595,9 +595,9 @@ namespace PercyIO.Playwright.Tests
             {
                 SetWidthsHttp("{\"widths\":[375,1280]}");
                 var http = new MockHttpMessageHandler();
-                http.When(HttpMethod.Get, "http://localhost:5338/percy/widths-config*")
+                http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/widths-config*")
                     .Respond("application/json", "{\"widths\":[375,1280]}");
-                http.When(HttpMethod.Get, "http://localhost:5338/percy/dom.js")
+                http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/dom.js")
                     .Respond("application/javascript", "window.PercyDOM={};");
                 Percy.setHttpClient(new HttpClient(http));
                 ResetDom();
@@ -628,9 +628,9 @@ namespace PercyIO.Playwright.Tests
             try
             {
                 var http = new MockHttpMessageHandler();
-                http.When(HttpMethod.Get, "http://localhost:5338/percy/widths-config*")
+                http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/widths-config*")
                     .Respond("application/json", "{\"widths\":[375,1280]}");
-                http.When(HttpMethod.Get, "http://localhost:5338/percy/dom.js")
+                http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/dom.js")
                     .Respond("application/javascript", "window.PercyDOM={};");
                 Percy.setHttpClient(new HttpClient(http));
                 ResetDom();
@@ -679,9 +679,9 @@ namespace PercyIO.Playwright.Tests
         private static MockHttpMessageHandler SnapshotHttp(string snapshotJson)
         {
             var http = new MockHttpMessageHandler();
-            http.When(HttpMethod.Get, "http://localhost:5338/percy/dom.js")
+            http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/dom.js")
                 .Respond("application/javascript", "window.PercyDOM={};");
-            http.When(HttpMethod.Post, "http://localhost:5338/percy/snapshot")
+            http.When(HttpMethod.Post, $"{Percy.CLI_API}/percy/snapshot")
                 .Respond("application/json", snapshotJson);
             return http;
         }
@@ -742,7 +742,7 @@ namespace PercyIO.Playwright.Tests
         private static MockHttpMessageHandler ScreenshotHttp(string json)
         {
             var http = new MockHttpMessageHandler();
-            http.When(HttpMethod.Post, "http://localhost:5338/percy/automateScreenshot")
+            http.When(HttpMethod.Post, $"{Percy.CLI_API}/percy/automateScreenshot")
                 .Respond("application/json", json);
             return http;
         }
@@ -841,7 +841,7 @@ namespace PercyIO.Playwright.Tests
             // Force the /percy/log POST to fail so Log's catch runs, with DebugEnabled=true
             // so the "Sending log to CLI failed" diagnostic line executes.
             var http = new MockHttpMessageHandler();
-            http.When(HttpMethod.Post, "http://localhost:5338/percy/log")
+            http.When(HttpMethod.Post, $"{Percy.CLI_API}/percy/log")
                 .Respond(HttpStatusCode.InternalServerError, "application/json", "{}");
             Percy.setHttpClient(new HttpClient(http));
 
@@ -951,7 +951,7 @@ namespace PercyIO.Playwright.Tests
             // catch is skipped, and the finally still writes the plain message to stderr.
             var http = new MockHttpMessageHandler();
             bool posted = false;
-            http.When(HttpMethod.Post, "http://localhost:5338/percy/log")
+            http.When(HttpMethod.Post, $"{Percy.CLI_API}/percy/log")
                 .Respond(_ =>
                 {
                     posted = true;
@@ -1057,7 +1057,7 @@ namespace PercyIO.Playwright.Tests
             page.SetupGet(p => p.Frames).Returns(new List<IFrame> { frame.Object });
 
             var http = new MockHttpMessageHandler();
-            http.When(HttpMethod.Get, "http://localhost:5338/percy/dom.js")
+            http.When(HttpMethod.Get, $"{Percy.CLI_API}/percy/dom.js")
                 .Respond("application/javascript", "window.PercyDOM={};");
             Percy.setHttpClient(new HttpClient(http));
             ResetDom();
