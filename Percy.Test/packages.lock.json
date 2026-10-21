@@ -226,7 +226,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.CSharp": "[4.7.0, )",
-          "Microsoft.Playwright": "[1.63.0, )",
+          "Microsoft.Playwright": "[1.43.0, )",
           "Newtonsoft.Json": "[13.0.3, )",
           "System.Text.Json": "[7.0.0, )"
         }
