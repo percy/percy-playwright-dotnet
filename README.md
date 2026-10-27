@@ -98,6 +98,16 @@ $ percy exec -- [your test command]
 - `name` (**required**) - The snapshot name; must be unique to each snapshot
 - `options` - An object containing various snapshot options ([see per-snapshot configuration options](https://www.browserstack.com/docs/percy/take-percy-snapshots/overview#per-snapshot-configuration))
 
+### Percy CLI address
+
+The SDK finds the local Percy CLI server from the first of these that is set and non-empty:
+
+1. `PERCY_CLI_API`
+2. `PERCY_SERVER_ADDRESS` (exported by `percy exec`, so `percy exec --port <port>` works without extra setup)
+3. `http://localhost:5338`
+
+A trailing `/` is ignored.
+
 ## Running Percy on Automate
 `Percy.Screenshot(driver, name, options)` [ needs @percy/cli 1.28.8+ ];
 

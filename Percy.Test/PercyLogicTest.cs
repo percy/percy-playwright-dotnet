@@ -370,5 +370,59 @@ namespace PercyIO.Playwright.Tests
 
             Assert.Equal("http://example.com/path", driver.GetUrl());
         }
+
+        // ─── ResolveCliApi ────────────────────────────────────────────────────
+
+        private static Func<string, string?> Env(Dictionary<string, string?> vars) =>
+            name => vars.TryGetValue(name, out var value) ? value : null;
+
+        [Fact]
+        public void ResolveCliApi_PrefersPercyCliApi()
+        {
+            var env = Env(new Dictionary<string, string?>
+            {
+                { "PERCY_CLI_API", "http://localhost:1111" },
+                { "PERCY_SERVER_ADDRESS", "http://localhost:2222" }
+            });
+            Assert.Equal("http://localhost:1111", Percy.ResolveCliApi(env));
+        }
+
+        [Fact]
+        public void ResolveCliApi_FallsBackToPercyServerAddress()
+        {
+            var env = Env(new Dictionary<string, string?>
+            {
+                { "PERCY_SERVER_ADDRESS", "http://localhost:2222" }
+            });
+            Assert.Equal("http://localhost:2222", Percy.ResolveCliApi(env));
+        }
+
+        [Fact]
+        public void ResolveCliApi_EmptyPercyCliApi_FallsBackToPercyServerAddress()
+        {
+            var env = Env(new Dictionary<string, string?>
+            {
+                { "PERCY_CLI_API", "" },
+                { "PERCY_SERVER_ADDRESS", "http://localhost:2222" }
+            });
+            Assert.Equal("http://localhost:2222", Percy.ResolveCliApi(env));
+        }
+
+        [Fact]
+        public void ResolveCliApi_NothingSet_UsesDefault()
+        {
+            var env = Env(new Dictionary<string, string?>());
+            Assert.Equal("http://localhost:5338", Percy.ResolveCliApi(env));
+        }
+
+        [Fact]
+        public void ResolveCliApi_TrimsTrailingSlash()
+        {
+            var env = Env(new Dictionary<string, string?>
+            {
+                { "PERCY_SERVER_ADDRESS", "http://localhost:2222/" }
+            });
+            Assert.Equal("http://localhost:2222", Percy.ResolveCliApi(env));
+        }
     }
 }

@@ -23,8 +23,20 @@ namespace PercyIO.Playwright
         // which defaults to the public env-derived DEBUG flag (unchanged behavior). Tests
         // can flip it to exercise the debug-only logging branches without setting env vars.
         internal static bool DebugEnabled = DEBUG;
-        public static readonly string CLI_API =
-            Environment.GetEnvironmentVariable("PERCY_CLI_API") ?? "http://localhost:5338";
+        public static readonly string CLI_API = ResolveCliApi(Environment.GetEnvironmentVariable);
+
+        // `percy exec` only exports PERCY_SERVER_ADDRESS, so without this fallback a
+        // non-default `--port` silently disables snapshots.
+        internal static string ResolveCliApi(Func<string, string?> getEnv)
+        {
+            foreach (var name in new[] { "PERCY_CLI_API", "PERCY_SERVER_ADDRESS" })
+            {
+                var value = getEnv(name);
+                if (!string.IsNullOrEmpty(value)) return value!.TrimEnd('/');
+            }
+            return "http://localhost:5338";
+        }
+
         public static readonly string CLIENT_INFO =
             typeof(Percy).Assembly.GetCustomAttribute<ClientInfoAttribute>().ClientInfo;
         public static readonly string ENVIRONMENT_INFO = Regex.Replace(

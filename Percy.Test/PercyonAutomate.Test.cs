@@ -37,7 +37,7 @@ namespace PercyIO.Playwright.Tests
                 version = "1.0",
             };
             mockHttp.Fallback.Respond(new HttpClient());
-            mockHttp.Expect(HttpMethod.Post, "http://localhost:5338/percy/automateScreenshot")
+            mockHttp.Expect(HttpMethod.Post, $"{Percy.CLI_API}/percy/automateScreenshot")
                 .WithPartialContent("Screenshot 1")
                 .WithPartialContent("page_123")
                 .WithPartialContent("frame_123")
@@ -70,7 +70,7 @@ namespace PercyIO.Playwright.Tests
                 data = syncData
             };
             mockHttp.Fallback.Respond(new HttpClient());
-            mockHttp.Expect(HttpMethod.Post, "http://localhost:5338/percy/automateScreenshot")
+            mockHttp.Expect(HttpMethod.Post, $"{Percy.CLI_API}/percy/automateScreenshot")
                 .WithPartialContent("Screenshot 1")
                 .WithPartialContent("sync")
                 .Respond("application/json", JsonConvert.SerializeObject(obj));
@@ -101,7 +101,7 @@ namespace PercyIO.Playwright.Tests
                 version = "1.0",
             };
             mockHttp.Fallback.Respond(new HttpClient());
-            mockHttp.Expect(HttpMethod.Post, "http://localhost:5338/percy/automateScreenshot")
+            mockHttp.Expect(HttpMethod.Post, $"{Percy.CLI_API}/percy/automateScreenshot")
                 .WithPartialContent("Screenshot 2")
                 .WithPartialContent("fullpage")
                 .Respond("application/json", JsonConvert.SerializeObject(obj));

@@ -175,7 +175,7 @@ namespace PercyIO.Playwright.Tests
             void AssertSnapshot(string name, string enableJavaScript)
             {
                 Assert.Contains($"Received snapshot: {name}", logs);
-                Assert.Contains("- url: http://localhost:5338/test/snapshot", logs);
+                Assert.Contains($"- url: {Percy.CLI_API}/test/snapshot", logs);
                 Assert.Contains($"- enableJavaScript: {enableJavaScript}", logs);
                 Assert.Contains($"- clientInfo: {Percy.CLIENT_INFO}", logs);
                 Assert.Contains($"- environmentInfo: {Percy.ENVIRONMENT_INFO}", logs);
@@ -204,7 +204,7 @@ namespace PercyIO.Playwright.Tests
 
             // Verify the snapshot was received and the key fields Percy.cs sends are present.
             Assert.Contains("Received snapshot: Snapshot 1", logs);
-            Assert.Contains("- url: http://localhost:5338/test/snapshot", logs);
+            Assert.Contains($"- url: {Percy.CLI_API}/test/snapshot", logs);
             Assert.Contains("- enableJavaScript: false", logs);
             Assert.Contains($"- clientInfo: {Percy.CLIENT_INFO}", logs);
             Assert.Contains($"- environmentInfo: {Percy.ENVIRONMENT_INFO}", logs);
@@ -810,6 +810,27 @@ namespace PercyIO.Playwright.Tests
     {
         private readonly TestsFixture _fixture;
 
+        // Same CLI server under a different host, so the iframes count as cross-origin.
+        // The host page must be really served from loopback (not route-fulfilled):
+        // Chromium's Local Network Access blocks loopback iframes in a page without an
+        // address space, which a fulfilled route response has.
+        private static readonly string CrossOrigin = AlternateLoopbackOrigin(Percy.CLI_API);
+
+        private static string AlternateLoopbackOrigin(string address)
+        {
+            var uri = new Uri(address);
+            var host = uri.Host == "localhost" ? "127.0.0.1" : "localhost";
+            return new UriBuilder(uri) { Host = host }.Uri.GetLeftPart(UriPartial.Authority);
+        }
+
+        // Asserted separately so a broken CLI test route isn't mistaken for a CORS failure.
+        private async Task GotoLoopbackHostPageAsync()
+        {
+            var response = await _fixture.Page.GotoAsync($"{Percy.CLI_API}/test/snapshot");
+            Assert.True(response?.Ok == true,
+                $"host page {Percy.CLI_API}/test/snapshot did not load (status {response?.Status})");
+        }
+
         public CorsIframeIntegrationTests()
         {
             Percy.ResetInternalCaches();
@@ -835,15 +856,13 @@ namespace PercyIO.Playwright.Tests
         [Fact]
         public async Task SnapshotWithCorsIframesAddsCorsIframesToDomSnapshot()
         {
-            // Serve an inline page at a localhost URL so that iframes pointing to
-            // 127.0.0.1 are detected as cross-origin (different Uri.Host).
-            const string html = "<p>CORS Iframe Test</p>\n" +
-                                 "<iframe src=\"http://127.0.0.1:5338/test/snapshot\"></iframe>\n" +
-                                 "<iframe src=\"http://127.0.0.1:5338/test/snapshot\"></iframe>\n";
+            // Iframes point at CrossOrigin, a different host than the page, so they are cross-origin.
+            string html = "<p>CORS Iframe Test</p>\n" +
+                           $"<iframe src=\"{CrossOrigin}/test/snapshot\"></iframe>\n" +
+                           $"<iframe src=\"{CrossOrigin}/test/snapshot\"></iframe>\n";
 
-            await _fixture.Page.RouteAsync("http://localhost:5338/cors-iframe-page", route =>
-                route.FulfillAsync(new RouteFulfillOptions { ContentType = "text/html", Body = html }));
-            await _fixture.Page.GotoAsync("http://localhost:5338/cors-iframe-page");
+            await GotoLoopbackHostPageAsync();
+            await _fixture.Page.SetContentAsync(html);
 
             Percy.Snapshot(_fixture.Page, "CORS Iframe Snapshot");
 
@@ -866,12 +885,11 @@ namespace PercyIO.Playwright.Tests
         {
             // Build a page with exactly 3 cross-origin iframes inline and verify the count.
             var iframes = string.Concat(Enumerable.Range(0, 3)
-                .Select(_ => "<iframe src=\"http://127.0.0.1:5338/test/snapshot\"></iframe>\n"));
+                .Select(_ => $"<iframe src=\"{CrossOrigin}/test/snapshot\"></iframe>\n"));
             string html = $"<p>CORS Count Test</p>\n{iframes}";
 
-            await _fixture.Page.RouteAsync("http://localhost:5338/cors-iframe-count-page", route =>
-                route.FulfillAsync(new RouteFulfillOptions { ContentType = "text/html", Body = html }));
-            await _fixture.Page.GotoAsync("http://localhost:5338/cors-iframe-count-page");
+            await GotoLoopbackHostPageAsync();
+            await _fixture.Page.SetContentAsync(html);
 
             Percy.Snapshot(_fixture.Page, "CORS Count Snapshot");
 
@@ -892,7 +910,7 @@ namespace PercyIO.Playwright.Tests
         public async Task SnapshotWithoutCorsIframesDoesNotAddCorsIframesProperty()
         {
             // A page with no cross-origin iframes should not have a corsIframes key.
-            await _fixture.Page.GotoAsync($"{Percy.CLI_API}/test/snapshot");
+            await GotoLoopbackHostPageAsync();
 
             Percy.Snapshot(_fixture.Page, "No CORS Iframe Snapshot");
 
@@ -915,12 +933,11 @@ namespace PercyIO.Playwright.Tests
             // every per-width DOM snapshot in the array should contain a corsIframes key.
             try
             {
-                const string html = "<p>Responsive CORS Test</p>\n" +
-                                    "<iframe src=\"http://127.0.0.1:5338/test/snapshot\"></iframe>\n";
+                string html = "<p>Responsive CORS Test</p>\n" +
+                              $"<iframe src=\"{CrossOrigin}/test/snapshot\"></iframe>\n";
 
-                await _fixture.Page.RouteAsync("http://localhost:5338/responsive-cors-page", route =>
-                    route.FulfillAsync(new RouteFulfillOptions { ContentType = "text/html", Body = html }));
-                await _fixture.Page.GotoAsync("http://localhost:5338/responsive-cors-page");
+                await GotoLoopbackHostPageAsync();
+                await _fixture.Page.SetContentAsync(html);
 
                 UnitTests.Request("/test/api/config", new { responsive = true, config = new[] { 375, 1280 } });
 
