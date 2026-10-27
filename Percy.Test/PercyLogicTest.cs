@@ -414,5 +414,15 @@ namespace PercyIO.Playwright.Tests
             var env = Env(new Dictionary<string, string?>());
             Assert.Equal("http://localhost:5338", Percy.ResolveCliApi(env));
         }
+
+        [Fact]
+        public void ResolveCliApi_TrimsTrailingSlash()
+        {
+            var env = Env(new Dictionary<string, string?>
+            {
+                { "PERCY_SERVER_ADDRESS", "http://localhost:2222/" }
+            });
+            Assert.Equal("http://localhost:2222", Percy.ResolveCliApi(env));
+        }
     }
 }

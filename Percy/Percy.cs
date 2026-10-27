@@ -32,7 +32,7 @@ namespace PercyIO.Playwright
             foreach (var name in new[] { "PERCY_CLI_API", "PERCY_SERVER_ADDRESS" })
             {
                 var value = getEnv(name);
-                if (!string.IsNullOrEmpty(value)) return value!;
+                if (!string.IsNullOrEmpty(value)) return value!.TrimEnd('/');
             }
             return "http://localhost:5338";
         }

@@ -814,7 +814,22 @@ namespace PercyIO.Playwright.Tests
         // The host page must be really served from loopback (not route-fulfilled):
         // Chromium's Local Network Access blocks loopback iframes in a page without an
         // address space, which a fulfilled route response has.
-        private static readonly string CrossOrigin = Percy.CLI_API.Replace("localhost", "127.0.0.1");
+        private static readonly string CrossOrigin = AlternateLoopbackOrigin(Percy.CLI_API);
+
+        private static string AlternateLoopbackOrigin(string address)
+        {
+            var uri = new Uri(address);
+            var host = uri.Host == "localhost" ? "127.0.0.1" : "localhost";
+            return new UriBuilder(uri) { Host = host }.Uri.GetLeftPart(UriPartial.Authority);
+        }
+
+        // Asserted separately so a broken CLI test route isn't mistaken for a CORS failure.
+        private async Task GotoLoopbackHostPageAsync()
+        {
+            var response = await _fixture.Page.GotoAsync($"{Percy.CLI_API}/test/snapshot");
+            Assert.True(response?.Ok == true,
+                $"host page {Percy.CLI_API}/test/snapshot did not load (status {response?.Status})");
+        }
 
         public CorsIframeIntegrationTests()
         {
@@ -841,13 +856,12 @@ namespace PercyIO.Playwright.Tests
         [Fact]
         public async Task SnapshotWithCorsIframesAddsCorsIframesToDomSnapshot()
         {
-            // Serve an inline page at a localhost URL so that iframes pointing to
-            // 127.0.0.1 are detected as cross-origin (different Uri.Host).
+            // Iframes point at CrossOrigin, a different host than the page, so they are cross-origin.
             string html = "<p>CORS Iframe Test</p>\n" +
                            $"<iframe src=\"{CrossOrigin}/test/snapshot\"></iframe>\n" +
                            $"<iframe src=\"{CrossOrigin}/test/snapshot\"></iframe>\n";
 
-            await _fixture.Page.GotoAsync($"{Percy.CLI_API}/test/snapshot");
+            await GotoLoopbackHostPageAsync();
             await _fixture.Page.SetContentAsync(html);
 
             Percy.Snapshot(_fixture.Page, "CORS Iframe Snapshot");
@@ -874,7 +888,7 @@ namespace PercyIO.Playwright.Tests
                 .Select(_ => $"<iframe src=\"{CrossOrigin}/test/snapshot\"></iframe>\n"));
             string html = $"<p>CORS Count Test</p>\n{iframes}";
 
-            await _fixture.Page.GotoAsync($"{Percy.CLI_API}/test/snapshot");
+            await GotoLoopbackHostPageAsync();
             await _fixture.Page.SetContentAsync(html);
 
             Percy.Snapshot(_fixture.Page, "CORS Count Snapshot");
@@ -896,7 +910,7 @@ namespace PercyIO.Playwright.Tests
         public async Task SnapshotWithoutCorsIframesDoesNotAddCorsIframesProperty()
         {
             // A page with no cross-origin iframes should not have a corsIframes key.
-            await _fixture.Page.GotoAsync($"{Percy.CLI_API}/test/snapshot");
+            await GotoLoopbackHostPageAsync();
 
             Percy.Snapshot(_fixture.Page, "No CORS Iframe Snapshot");
 
@@ -922,7 +936,7 @@ namespace PercyIO.Playwright.Tests
                 string html = "<p>Responsive CORS Test</p>\n" +
                               $"<iframe src=\"{CrossOrigin}/test/snapshot\"></iframe>\n";
 
-                await _fixture.Page.GotoAsync($"{Percy.CLI_API}/test/snapshot");
+                await GotoLoopbackHostPageAsync();
                 await _fixture.Page.SetContentAsync(html);
 
                 UnitTests.Request("/test/api/config", new { responsive = true, config = new[] { 375, 1280 } });
