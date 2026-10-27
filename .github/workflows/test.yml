@@ -11,8 +11,17 @@ on:
         default: master
 jobs:
   test:
-    name: Test
+    # Default leg keeps the plain "Test" check name in case it is a required check.
+    name: ${{ matrix.playwright == '1.63.0' && 'Test' || format('Test (Playwright {0})', matrix.playwright) }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.43.0 is the SDK's published Microsoft.Playwright floor; 1.63.0 is the certified latest.
+        playwright: ['1.63.0', '1.43.0']
+    env:
+      # MSBuild reads env vars as properties; Percy.Test.csproj defaults this to 1.63.0.
+      PlaywrightVersion: ${{ matrix.playwright }}
     steps:
       - uses: actions-ecosystem/action-regex-match@v2
         id: regex-match
@@ -30,7 +39,7 @@ jobs:
       - uses: actions/cache@v3
         with:
           path: ~/.nuget/packages
-          key: ${{ runner.os }}/nuget-5.0.x/${{ hashFiles('**/packages.lock.json') }}
+          key: ${{ runner.os }}/nuget-5.0.x/pw-${{ matrix.playwright }}/${{ hashFiles('**/packages.lock.json') }}
           restore-keys: ${{ runner.os }}/nuget-5.0.x/
       - uses: actions/cache@v3
         with:
